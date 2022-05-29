@@ -1,4 +1,5 @@
-(ns user
+(ns odie.dev
+  "Temporary namespace used for experimentation and putting the program together"
   (:require [clojure.string :as str]
             [cognitect.aws.client.api :as aws]
             [clojure.edn :as edn]
@@ -295,12 +296,5 @@
 
   (aws/invoke cf {:op :CreateStack
                   :request (setup-roles--req-data @g/app-context)})
-
-  {
-   :StackName "sokoban-test-stack"
-   ;; :TemplateBody (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
-   :Parameters (->params {:sokoban-application "test app"})
-   :Tags (->tags {:sokoban-application "test"})
-   }
 
  )
