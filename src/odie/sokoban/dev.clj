@@ -13,10 +13,21 @@
             [odie.sokoban.aws-utils :as au]
             ))
 
+(defn credentials-filepath []
+  (u/expand-home "~/.sokoban/credentials.edn"))
+
 (defn load-credentials []
-  (->> (u/expand-home "~/.sokoban/credentials.edn")
+  (->> (credentials-filepath)
        slurp
        edn/read-string))
+
+(defn write-edn
+  "Write the `data` to `target-file` in EDN format"
+  [target-file data]
+  (spit target-file (pr-str data)))
+
+(defn save-credentials [data]
+  (write-edn (credentials-filepath) data))
 
 (defn credential-by-name
   ([creds]
@@ -65,25 +76,49 @@
         aws-identity (aws/invoke sts {:op :GetCallerIdentity})]
     (:Account aws-identity)))
 
-(defn start-app []
+(defn fetch-account-id! [context]
+  (swap! context assoc :account-id (fetch-account-id)))
+
+(defn set-active-credential!
+  [cred-name]
+  (let [new-cred-name (if (= cred-name "default")
+                        (get @g/credentials "default")
+                        cred-name)]
+    (reset! g/active-credential-name new-cred-name)
+    (setup-credential-provider! g/credentials-provider @g/credentials new-cred-name)))
+
+(defn start-app! []
   ;; Load up app-wide credentials store
   ;; It's a bit strange to load up ALL the credentials though
   (reset! g/credentials (load-credentials))
 
   ;; Load up the default credentials
-  (setup-credential-provider! g/app-context @g/credentials "default")
+  (set-active-credential! "default")
 
-  (swap! g/app-context assoc :account-id (fetch-account-id)))
+  ;; (setup-credential-provider! g/credentials-provider @g/credentials "default")
+
+  ;; Make sure we have the account-id loaded
+  (when-not (get-in @g/credentials [@g/active-credential-name :account-id])
+    ;; If we don't have it, fetch it now
+    (if-let [account-id (fetch-account-id)]
+      (do
+        ;; Save it back into the settings file
+        (swap! g/credentials assoc-in [@g/active-credential-name :account-id] account-id)
+        (save-credentials @g/credentials)
+
+        ;; Make account-id available as part of the app-context
+        (swap! g/app-context assoc :account-id (fetch-account-id))
+
+        )
+      (throw (ex-info "Cannot fetch account-id"))))
+
+  (swap! g/app-context assoc :account-id (:account-id @g/credentials)))
 
 
 (comment
   (reset! g/app-context (empty @g/app-context))
 
-  (start-app)
-
-  ;; Try to load a credential from the data from the settings file
-  (let [cred (credential-by-name @credentials "kengo")]
-    (swap! app-context assoc :credential cred))
+  (start-app!)
 
   ;; Setup the name of the app we're working with
   ;; This will determine the name of the cluster.
