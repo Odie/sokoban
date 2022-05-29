@@ -11,14 +11,6 @@
             [odie.globals :as g]
             ))
 
-(defn key-starts-with? [k s]
-  (str/starts-with? (name k) s))
-
-(defn expand-home [s]
-  (if (.startsWith s "~")
-    (clojure.string/replace-first s "~" (System/getProperty "user.home"))
-    s))
-
 (defn load-credentials []
   (->> (expand-home "~/.sokoban/credentials.edn")
        slurp
@@ -38,83 +30,6 @@
   (->> (expand-home "~/.sokoban/env.edn")
        slurp
        edn/read-string))
-
-(defn arn? [s]
-  (str/starts-with? s "arn:aws:"))
-
-(defn collect-arn [coll]
-  (let [res (transient [])]
-    (postwalk
-     (fn [x]
-       ;; Collect any items that look like an arn
-       (when (arn? x)
-         (conj! res x))
-
-       ;; always return the thing itself
-       x)
-     coll)
-    (persistent! res)))
-
-(defn str-split-at [s idx]
-  (list (subs s 0 idx) (subs s idx)))
-
-(defn str-split-first
-  "Split the string using the first occurrence of the `substr`"
-  [s substr]
-  (let [idx (str/index-of s substr)]
-    (list (subs s 0 idx) (subs s (+ idx (count substr))))))
-
-(defn arn->map [s]
-  (let [base-format (str/replace s #"[a-zA-Z0-9\-]" "")]
-
-    (case base-format
-      ":::::"
-      (zipmap
-       [:partition :service :region :account-id :resource-id]
-       (drop 1 (str/split s #":")))
-
-      "::::::"
-      (zipmap
-       [:partition :service :region :account-id :resource-type :resource-id]
-       (drop 1 (str/split s #":")))
-
-      ":::::/"
-      (zipmap
-       [:partition :service :region :account-id :resource-type :resource-id]
-       (let [vals (drop 1 (str/split s #":"))
-             last-vals (str-split-first (last vals) "/")]
-         (concat (butlast vals) last-vals))))))
-
-(defn aws-ops [client]
-  (keys (aws/ops client)))
-
-(defn param [key-name value]
-  {:ParameterKey (name key-name)
-   :ParameterValue
-   (cond
-     (keyword? value)
-     (name value)
-     :else
-     value)})
-
-(defn ->params [m]
-  (map (fn [[k v]] (param k v)) m))
-
-(defn tag [key-name value]
-  {:Key (name key-name)
-   :Value (name value)})
-
-(defn ->tags [m]
-  (map (fn [[k v]] (tag k v)) m))
-
-(defn on-spec? [spec data]
-  ;; Is the data valid according to the spec?
-  (if (s/valid? spec data)
-    ;; If so... just say it's okay...
-    true
-
-    ;; Otherwise, say why it's not on spec
-    (s/explain-data {} spec data)))
 
 ;; ;; MOVEME! This should come from some data file
 ;; ;; (def default-credentials-name "kengo")
