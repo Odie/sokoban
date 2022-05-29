@@ -1,4 +1,4 @@
-(ns odie.globals)
+(ns odie.sokoban.globals)
 
 (defonce app-context (atom {}))
 (defonce credentials (atom {}))

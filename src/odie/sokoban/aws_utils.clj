@@ -1,8 +1,10 @@
-(ns odie.aws-utils
+(ns odie.sokoban.aws-utils
   "Utilities that deal specifically with AWS data"
   (:require [clojure.string :as str]
             [clojure.walk :refer [postwalk]]
             [clojure.spec.alpha :as s]
+            [odie.sokoban.utils :as u]
+            [cognitect.aws.client.api :as aws]
             ))
 
 
@@ -42,7 +44,7 @@
       (zipmap
        [:partition :service :region :account-id :resource-type :resource-id]
        (let [vals (drop 1 (str/split s #":"))
-             last-vals (str-split-first (last vals) "/")]
+             last-vals (u/str-split-first (last vals) "/")]
          (concat (butlast vals) last-vals))))))
 
 

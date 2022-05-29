@@ -1,4 +1,4 @@
-(ns odie.dev
+(ns odie.sokoban.dev
   "Temporary namespace used for experimentation and putting the program together"
   (:require [clojure.string :as str]
             [cognitect.aws.client.api :as aws]
@@ -8,11 +8,13 @@
             [clojure.spec.alpha :as s]
             [clojure.walk :refer [postwalk]]
             [phrase.alpha :refer [phrase-first]]
-            [odie.globals :as g]
+            [odie.sokoban.globals :as g]
+            [odie.sokoban.utils :as u]
+            [odie.sokoban.aws-utils :as au]
             ))
 
 (defn load-credentials []
-  (->> (expand-home "~/.sokoban/credentials.edn")
+  (->> (u/expand-home "~/.sokoban/credentials.edn")
        slurp
        edn/read-string))
 
@@ -27,7 +29,7 @@
      (get creds cred-name))))
 
 (defn load-envs []
-  (->> (expand-home "~/.sokoban/env.edn")
+  (->> (u/expand-home "~/.sokoban/env.edn")
        slurp
        edn/read-string))
 
@@ -43,7 +45,7 @@
     {:StackName (str app-name "-infrastructure-roles")
      :Capabilities ["CAPABILITY_NAMED_IAM"]
      :TemplateBody (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
-     :Parameters (->params {:AdminRoleName (str app-name "-adminrole")
+     :Parameters (au/->params {:AdminRoleName (str app-name "-adminrole")
                             :ExecutionRoleName (str app-name "-executionrole")
                             :DNSDelegationRoleName (str app-name "-DNSDelegationRole")
                             :AppDNSDelegatedAccounts account-id
@@ -51,7 +53,7 @@
                             ;; AppDomainHostedZoneID:
                             :AppName app-name
                             })
-     :Tags (->tags {:sokoban-application app-name})}))
+     :Tags (au/->tags {:sokoban-application app-name})}))
 
 
 (defn setup-credential-provider! [context credentials cred-name]
