@@ -1,0 +1,44 @@
+Sokoban is a AWS copilot work-alike that specifically manages clusters backed by EC2 instances.
+
+* Why?
+Docker compose is a great way to describe a collection of inter-connected services. It would be great if we can just deploy against AWS using such a simple definition file.
+
+Docker's compose-ecs integration attempts to do this. But:
+- It will only deploy your containers on Fargate.
+- Further customizing your stack seem difficult or impossible.
+
+AWS copilot is great for easily setting up an app on aws. However, it also seems to only want to deploy on Fargate.
+
+Fortunately, the AWS API makes operating on the infrastructure programmatically relatively simple. Since what we'll likely be doing a bunch of data transformation internally until we are ready to send out some json payload to AWS API endpoints, Clojure seem like it would be a very good fit. Clojure's interactive development model should make experimenting with the API very straightforward as well.
+
+* Getting there
+The first step though, is to figure out what exactly copilot is doing when it's setting up the stack.
+
+** Steps
+*** Setup a cluster
+**** Create or use an existing cloud formation stack
+We can use this to create and manage a bundle of associated AWS resources. This is a good starting point to create an empty cluster and required resources.
+
+*** Setup IAM role used by custom resources to describe your ECS service
+
+*** Setup service discovery
+
+*** Update security group for load balancer to allow HTTP & HTTPS traffic
+*** Setup load balancer to distribute traffic
+*** Setup load balancer listener to route HTTP traffic
+
+*** Setup IAM role to update your environment stack (cloud formation?)
+*** Setup IAM role for Fargate agent to make AWS API calls on your behalf
+*** A HTTP listener rule for forwarding HTTP traffic
+*** A custom resource Assigning priority for HTTP listener rules
+*** A CloudWatch log group to hold your service logs
+*** A ECS service to run and maintain your tasks in the environment cluster
+*** A target group to connect the load balancer to your service
+*** An IAM role to control permissions for the containers in your tasks
+*** Deploy service API
+
+#  LocalWords:  Sokoban Fargate CloudWatch
+
+* Misc
+** Try using Cloud Control to fetch general resource status
+https://docs.aws.amazon.com/cloudcontrolapi/latest/APIReference/Welcome.html

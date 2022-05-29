@@ -1,5 +1,14 @@
 {:paths ["src" "resources"]
- :deps {org.clojure/clojure {:mvn/version "1.10.3"}}
+ :deps {org.clojure/clojure         {:mvn/version "1.10.3"}
+        com.cognitect.aws/api       {:mvn/version "0.8.539"}
+        com.cognitect.aws/endpoints {:mvn/version "1.1.12.206"}
+        com.cognitect.aws/s3        {:mvn/version "822.2.1109.0"}
+        com.cognitect.aws/ecs       {:mvn/version "821.2.1107.0" }
+        com.cognitect.aws/ec2       {:mvn/version "822.2.1122.0"}
+        com.cognitect.aws/cloudformation {:mvn/version "821.2.1107.0"}
+        com.cognitect.aws/iam       {:mvn/version "821.2.1107.0"}
+        com.cognitect.aws/sts       {:mvn/version "822.2.1109.0"}
+        phrase/phrase               {:mvn/version "0.3-alpha4"}}
  :aliases
  {:run-m {:main-opts ["-m" "odie.sokoban"]}
   :run-x {:ns-default odie.sokoban
