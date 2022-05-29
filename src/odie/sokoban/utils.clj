@@ -37,4 +37,4 @@
     true
 
     ;; Otherwise, say why it's not on spec
-    (s/explain-data {} spec data)))
+    (s/explain-data spec data)))
