@@ -2,7 +2,7 @@
 #
 # Copyright Amazon.com Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-Description: CloudFormation environment template for infrastructure shared among Sokoban workloads.
+Description: CloudFormation environment template for ECS Fargate infrastructure shared among Sokoban workloads.
 Metadata:
   Version: v1.9.0
 Parameters:
@@ -35,6 +35,29 @@ Parameters:
     AllowedValues: [true, false]
     Default: false
   ServiceDiscoveryEndpoint:
+    Type: String
+  EC2AmiId:
+    Description: The AMI to use for launched EC2 instances
+    Type: String
+    Default: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
+  EC2InstanceType:
+    Description: The instance type of the launched EC2 instances
+    Type: String
+    Default: "t3.small"
+  AsgMinSize:
+    Description: Minimum size of ECS Auto Scaling Group
+    Type: Number
+    Default: "0"
+  AsgMaxSize:
+    Description: Maximum size of ECS Auto Scaling Group
+    Type: Number
+    Default: "5"
+  AsgDesiredCapacity:
+    Description: Desired Capacity of ECS Auto Scaling Group
+    Type: Number
+    Default: "1"
+  EC2InstanceKeyName:
+    Description: Name of key to use for ssh access
     Type: String
 Conditions:
   CreateALB:
