@@ -112,12 +112,9 @@
         )
       (throw (ex-info "Cannot fetch account-id"))))
 
-  (swap! g/app-context assoc :account-id (:account-id @g/credentials)))
+  (swap! g/app-context assoc :account-id (get-in @g/credentials [@g/active-credential-name :account-id])))
 
-
-(comment
-  (reset! g/app-context (empty @g/app-context))
-
+(defn dev-start-app! []
   (start-app!)
 
   ;; Setup the name of the app we're working with
@@ -125,6 +122,12 @@
   ;; It will also be prefixed on various resources so it's easy
   ;; to understand they ought to be grouped together.
   (g/set-app-name! "kengo")
+  )
+
+(comment
+  (reset! g/app-context (empty @g/app-context))
+
+  (dev-start-app!)
 
   (setup-roles--req-data @g/app-context)
 

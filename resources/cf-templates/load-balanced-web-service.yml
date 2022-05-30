@@ -24,6 +24,7 @@ Parameters:
   DNSDelegated:
     Type: String
     AllowedValues: [true, false]
+    Default: false
   LogRetention:
     Type: Number
   AddonsTemplateURL:
@@ -41,8 +42,10 @@ Parameters:
   HTTPSEnabled:
     Type: String
     AllowedValues: [true, false]
+    Default: false
   RulePath:
     Type: String
+    Default: "/"
   Stickiness:
     Type: String
     Default: false

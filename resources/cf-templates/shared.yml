@@ -12,21 +12,28 @@ Parameters:
     Type: String
   ALBWorkloads:
     Type: String
+    Default: ""
   EFSWorkloads:
     Type: String
+    Default: ""
   NATWorkloads:
     Type: String
+    Default: ""
   ToolsAccountPrincipalARN:
     Type: String
   AppDNSName:
     Type: String
+    Default: ""
   AppDNSDelegationRole:
     Type: String
+    Default: ""
   Aliases:
     Type: String
+    Default: ""
   CreateHTTPSListener:
     Type: String
     AllowedValues: [true, false]
+    Default: false
   ServiceDiscoveryEndpoint:
     Type: String
 Conditions:
