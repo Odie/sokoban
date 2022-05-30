@@ -121,7 +121,7 @@
         spec?)))
 
   (if (:StackId create-result)
-    (cf-watch-for-stack-completion cf (:StackId craete-result)))
+    (cf-watch-for-stack-completion cf (:StackId create-result)))
 
   ;; Step 2: Setup common infrastructure
   (def create-result
