@@ -74,8 +74,11 @@
   ;; TODO! If a "NextToken" is present in the reply,
   ;; we should make more requests to assemble the full
   ;; status of the stack
-  (aws/invoke cf {:op :ListStackResources
-                  :request {:StackName stackname}}))
+  (merge
+   (aws/invoke cf {:op :DescribeStacks
+                   :request {:StackName stackname}})
+   (aws/invoke cf {:op :ListStackResources
+                   :request {:StackName stackname}})))
 
 (defn resource-created? [resource-summary]
   (= (:ResourceStatus resource-summary) "CREATE_COMPLETE"))
@@ -85,30 +88,37 @@
     (or (= status "DELETE_COMPLETE")
         (= status "DELETE_SKIPPED"))))
 
+(defn resource-op-complete? [resource-summary]
+  (or (resource-created? resource-summary)
+      (resource-deleted? resource-summary)))
+
 (defn cf-watch-for-stack-completion [cf stackname]
   (let [start-time (System/nanoTime)
         result (loop []
                  (let [reply (cf-fetch-stack-status cf stackname)
-                       summaries (:StackResourceSummaries reply)]
+                       ]
 
                    ;; If we can't fetch the summaries for some reason...
-                   (if-not summaries
+                   (if (aws-error? reply)
 
                      ;; Just return whatever AWS sent us
                      reply
 
                      ;; We can fetch the summaries...
-                     (do
+                     (let [summaries (:StackResourceSummaries reply)
+                           stack (get-in reply [:Stacks 0])
+
+                           data (concat [{:LogicalResourceId (format "%s stack" (:StackName stack))
+                                          :ResourceStatus (:StackStatus stack)}]
+                                        (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))
+                           ]
                        ;; Print it
-                       (->> summaries
-                            (map #(select-keys % [:LogicalResourceId :ResourceStatus]))
-                            clojure.pprint/print-table
-                            )
+                       (clojure.pprint/print-table data)
 
                        ;; Keep looping every few seconds until everything has either been
                        ;; created or deleted (in case there is an error).
-                       (if-not (or (every? #(resource-created? %) summaries)
-                                   (every? #(resource-deleted? %) summaries))
+                       (if (or (empty? summaries)
+                               (not (every? #(resource-op-complete? %) summaries)))
                          (do
                            (Thread/sleep 5000)
                            (recur)))))))]
@@ -132,14 +142,73 @@
                        :sokoban-service WorkloadName
                        })}))
 
+(defn aws-error? [o]
+  (= (:cognitect.anomalies/category o) :cognitect.anomalies/incorrect))
+
+(defn aws-client [api-kw]
+  (aws/client {:api api-kw
+               :credentials-provider @g/credentials-provider}))
+
+(defn keypair-by-name
+  "Given the name of a keypair, try to locate its secret key in SSM"
+  [n]
+
+  (let [ec2 (aws-client :ec2)
+
+        ;; Ask EC2 about the keypair
+        keypair-reply (aws/invoke ec2 {:op :DescribeKeyPairs
+                                       :request {:KeyNames [n]}})]
+
+    (if (aws-error? keypair-reply)
+      keypair-reply
+
+      (let [;; Get the ID of the key
+            key-id (get-in keypair-reply [:KeyPairs 0 :KeyPairId])
+
+            ssm (aws-client :ssm)
+
+            ;; Ask SSM about the key
+            key-reply (aws/invoke ssm {:op :GetParameter
+                                       :request {:Name (str "/ec2/keypair/" key-id)
+                                                 :WithDecryption true}})]
+
+        (if (aws-error? key-reply)
+          key-reply
+
+          (get-in key-reply [:Parameter :Value]))))))
+
+(defn cluster-instance-key
+  "Given the name of a ECS EC2 stack, return the private key instance key"
+  [stack-name]
+
+  (let [cf (aws-client :cloudformation)
+
+        keypair-res-reply (aws/invoke cf {:op :DescribeStackResource
+                                          :request {:StackName stack-name
+                                                    :LogicalResourceId "EcsInstanceKeyPair"}})]
+    (if (aws-error? keypair-res-reply)
+      keypair-res-reply
+
+      (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId])))))
+
 (comment
+
+  (keypair-by-name "orange-test-instance-key")
+  (cluster-instance-key "orange-test")
+
+  (aws/invoke cf {:op :DescribeStacks
+                  :request {:StackName "orange-test"}
+                  })
+
   (dev/dev-start-app!)
+
+  (aws/doc cf :ListStackResources)
+  (aws/doc cf :DescribeStackResource)
 
   ;;-----------------------------------------------
   ;;
   ;; Explore KMS keys
-  (def kms (aws/client {:api :kms
-                       :credentials-provider @g/credentials-provider}))
+  (def kms (aws-client :kms))
 
   (aws/doc kms :ListKeys)
 
@@ -158,8 +227,7 @@
   ;;-----------------------------------------------
   ;;
   ;; Explore EC2 KeyPairs
-  (def ec2 (aws/client {:api :ec2
-                        :credentials-provider @g/credentials-provider}))
+  (def ec2 (aws-client :ec2))
 
   (aws/validate-requests ec2)
 
@@ -175,14 +243,14 @@
 
   ;;-----------------------------------------------
   ;;
-  ;; Interactively operate CloudFormation
-  (def cf (aws/client {:api :cloudformation
-                       :credentials-provider @g/credentials-provider}))
+  ;; Interactively operate Cloud Formation
+  (def cf (aws-client :cloudformation))
 
   (aws/validate-requests cf)
 
   (g/set-app-name! "orange")
 
+  (aws/invoke cf {:op :ListStacks})
 
 
   ;; Step 1: Setup roles
@@ -299,6 +367,40 @@
         spec?)
       )
     )
+
+  (aws/doc ec2 :DescribeKeyPairs)
+
+  ;; Ask AWS to describe the key that was just created
+  (def reply
+    (aws/invoke ec2 {:op :DescribeKeyPairs
+                     :request {:KeyNames ["orange-test-instance-key"]}
+                     }))
+
+  ;; Get the ID of the key
+  (def key-id
+    (-> reply
+        (get-in [:KeyPairs 0 :KeyPairId])))
+
+  (def key-reply
+    (aws/invoke ssm {:op :GetParameter
+                     :request {:Name (str "/ec2/keypair/" key-id)
+                               :WithDecryption true}}))
+
+  (spit (u/expand-home (str "~/.ssh/" "orange-test-instance-key")) (get-in key-reply [:Parameter :Value]))
+
+
+
+  ;; Fetch the newly created key
+  (def ssm (aws-client :ssm))
+
+  (aws/doc ssm :GetParameter)
+
+  (aws/doc cf :ListStackResources)
+  (aws/invoke cf {:op :ListStackResources
+                  :request {:StackName "orange-test"}
+                  })
+
+
 
   ;; Watch and wait for the creation to complete
   (if (:StackId create-result)

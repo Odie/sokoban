@@ -10,6 +10,7 @@
         com.cognitect.aws/sts       {:mvn/version "822.2.1109.0"}
         com.cognitect.aws/kms       {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/lightsail {:mvn/version "822.2.1145.0"}
+        com.cognitect.aws/ssm       {:mvn/version "822.2.1145.0"},
         phrase/phrase               {:mvn/version "0.3-alpha4"}}
  :aliases
  {:run-m {:main-opts ["-m" "odie.sokoban"]}

@@ -38,8 +38,10 @@ Parameters:
     Type: String
   EC2AmiId:
     Description: The AMI to use for launched EC2 instances
-    Type: String
-    Default: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    # Type: String
+    # Default: "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended"
   EC2InstanceType:
     Description: The instance type of the launched EC2 instances
     Type: String
@@ -920,20 +922,25 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
 
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [ !Ref EcsInstanceRole ]
+
   EcsInstanceLc:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       ImageId: !Ref EC2AmiId
       InstanceType: !Ref EC2InstanceType
-      SpotPrice: AWS::NoValue
-      IamInstanceProfile: !Ref EcsInstanceRole
+      IamInstanceProfile: !Ref EcsInstanceProfile
       KeyName: !Ref EcsInstanceKeyPair
-
+      EbsOptimized: true
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: InternetGatewayAttachment
     Properties:
-      VpcId: !Ref VPC
       VPCZoneIdentifier: [ !Ref PublicSubnet1, !Ref PublicSubnet2,  ]
       LaunchConfigurationName: !Ref EcsInstanceLc
       MinSize: !Ref AsgMinSize
@@ -943,7 +950,14 @@ Resources:
   CapacityProvider:
     Type: AWS::ECS::CapacityProvider
     Properties:
-      AutoScalingGroupProvider: !Ref AutoScalingGroup
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref AutoScalingGroup
+        ManagedScaling:
+          MaximumScalingStepSize: 2
+          MinimumScalingStepSize: 1
+          Status: ENABLED
+          TargetCapacity: 10
+        # ManagedTerminationProtection: ENABLED
       Name: !Sub ${AWS::StackName}-CapacityProvider
 
 Outputs:
