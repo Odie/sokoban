@@ -58,6 +58,9 @@ Parameters:
     Description: Desired Capacity of ECS Auto Scaling Group
     Type: Number
     Default: "1"
+  UserData:
+    Description: User data for EC2 instances. Required for EC2 to connect to join its cluster.
+    Type: String
 
 Conditions:
   CreateALB:
@@ -263,6 +266,7 @@ Resources:
       'sokoban:description': 'An ECS cluster to group your services'
     Type: AWS::ECS::Cluster
     Properties:
+      ClusterName: !Sub ${AppName}-${EnvironmentName}
       CapacityProviders:
         - !Ref CapacityProvider
       Configuration:
@@ -936,6 +940,8 @@ Resources:
       IamInstanceProfile: !Ref EcsInstanceProfile
       KeyName: !Ref EcsInstanceKeyPair
       EbsOptimized: true
+      UserData:
+        Fn::Base64: !Ref UserData
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup

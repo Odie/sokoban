@@ -324,6 +324,10 @@
                   :AsgMinSize "0"
                   :AsgMaxSize "5"
                   :AsgDesiredCapacity "1"
+                  :UserData (format"#!/bin/bash
+echo ECS_CLUSTER=\"%s\" >> /etc/ecs/ecs.config;
+echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
+" (format "%s-%s"app-name environment))
                   }
           req (setup-ECS-EC2-infrastructure--req-data params)
           spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
