@@ -962,8 +962,8 @@ Resources:
           MaximumScalingStepSize: 2
           MinimumScalingStepSize: 1
           Status: ENABLED
-          TargetCapacity: 10
-        # ManagedTerminationProtection: ENABLED
+          TargetCapacity: 80 # Launch new instances when we reach 80% utilization
+        ManagedTerminationProtection: ENABLED
       Name: !Sub ${AWS::StackName}-CapacityProvider
 
 Outputs:

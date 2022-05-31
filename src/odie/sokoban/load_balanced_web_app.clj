@@ -5,7 +5,7 @@
             [cognitect.aws.client.api :as aws]
             [odie.sokoban.globals :as g]
             [odie.sokoban.dev :as dev]
-            ))
+            [clojure.string :as str]))
 
 ;; Steps
 ;; 1. Setup roles
@@ -90,7 +90,8 @@
 
 (defn resource-op-complete? [resource-summary]
   (or (resource-created? resource-summary)
-      (resource-deleted? resource-summary)))
+      (resource-deleted? resource-summary)
+      (str/includes? (:ResourceStatus resource-summary) "COMPLETE")))
 
 (defn cf-watch-for-stack-completion [cf stackname]
   (let [start-time (System/nanoTime)
@@ -117,8 +118,7 @@
 
                        ;; Keep looping every few seconds until everything has either been
                        ;; created or deleted (in case there is an error).
-                       (if (or (empty? summaries)
-                               (not (every? #(resource-op-complete? %) summaries)))
+                       (if (not (every? #(resource-op-complete? %) data))
                          (do
                            (Thread/sleep 5000)
                            (recur)))))))]
