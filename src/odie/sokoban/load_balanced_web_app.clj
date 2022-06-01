@@ -91,16 +91,17 @@
 (defn resource-op-complete? [resource-summary]
   (or (resource-created? resource-summary)
       (resource-deleted? resource-summary)
-      (str/includes? (:ResourceStatus resource-summary) "COMPLETE")))
+      (str/includes? (:ResourceStatus resource-summary) "COMPLETE")
+      ;; (= (:ResourceStatus resource-summary) "CREATE_FAILED")
+      ))
 
 (defn cf-watch-for-stack-completion [cf stackname]
   (let [start-time (System/nanoTime)
         result (loop []
-                 (let [reply (cf-fetch-stack-status cf stackname)
-                       ]
+                 (let [reply (cf-fetch-stack-status cf stackname)]
 
                    ;; If we can't fetch the summaries for some reason...
-                   (if (aws-error? reply)
+                   (if (au/aws-error? reply)
 
                      ;; Just return whatever AWS sent us
                      reply
@@ -111,8 +112,7 @@
 
                            data (concat [{:LogicalResourceId (format "%s stack" (:StackName stack))
                                           :ResourceStatus (:StackStatus stack)}]
-                                        (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))
-                           ]
+                                        (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))]
                        ;; Print it
                        (clojure.pprint/print-table data)
 
@@ -142,37 +142,31 @@
                        :sokoban-service WorkloadName
                        })}))
 
-(defn aws-error? [o]
-  (= (:cognitect.anomalies/category o) :cognitect.anomalies/incorrect))
-
-(defn aws-client [api-kw]
-  (aws/client {:api api-kw
-               :credentials-provider @g/credentials-provider}))
 
 (defn keypair-by-name
   "Given the name of a keypair, try to locate its secret key in SSM"
   [n]
 
-  (let [ec2 (aws-client :ec2)
+  (let [ec2 (au/aws-client :ec2)
 
         ;; Ask EC2 about the keypair
         keypair-reply (aws/invoke ec2 {:op :DescribeKeyPairs
                                        :request {:KeyNames [n]}})]
 
-    (if (aws-error? keypair-reply)
+    (if (au/aws-error? keypair-reply)
       keypair-reply
 
       (let [;; Get the ID of the key
             key-id (get-in keypair-reply [:KeyPairs 0 :KeyPairId])
 
-            ssm (aws-client :ssm)
+            ssm (au/aws-client :ssm)
 
             ;; Ask SSM about the key
             key-reply (aws/invoke ssm {:op :GetParameter
                                        :request {:Name (str "/ec2/keypair/" key-id)
                                                  :WithDecryption true}})]
 
-        (if (aws-error? key-reply)
+        (if (au/aws-error? key-reply)
           key-reply
 
           (get-in key-reply [:Parameter :Value]))))))
@@ -181,12 +175,12 @@
   "Given the name of a ECS EC2 stack, return the private key instance key"
   [stack-name]
 
-  (let [cf (aws-client :cloudformation)
+  (let [cf (au/aws-client :cloudformation)
 
         keypair-res-reply (aws/invoke cf {:op :DescribeStackResource
                                           :request {:StackName stack-name
                                                     :LogicalResourceId "EcsInstanceKeyPair"}})]
-    (if (aws-error? keypair-res-reply)
+    (if (au/aws-error? keypair-res-reply)
       keypair-res-reply
 
       (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId])))))
@@ -208,7 +202,7 @@
   ;;-----------------------------------------------
   ;;
   ;; Explore KMS keys
-  (def kms (aws-client :kms))
+  (def kms (au/aws-client :kms))
 
   (aws/doc kms :ListKeys)
 
@@ -227,7 +221,7 @@
   ;;-----------------------------------------------
   ;;
   ;; Explore EC2 KeyPairs
-  (def ec2 (aws-client :ec2))
+  (def ec2 (au/aws-client :ec2))
 
   (aws/validate-requests ec2)
 
@@ -244,7 +238,7 @@
   ;;-----------------------------------------------
   ;;
   ;; Interactively operate Cloud Formation
-  (def cf (aws-client :cloudformation))
+  (def cf (au/aws-client :cloudformation))
 
   (aws/validate-requests cf)
 
@@ -361,6 +355,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                   :LogRetention "30"
                   :TargetContainer service-name
                   :TargetPort "80"
+                  :LaunchType "EC2"
                   }
           req (setup-load-balanced-web-service--req-data params)
           spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
@@ -372,44 +367,8 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
       )
     )
 
-  (aws/doc ec2 :DescribeKeyPairs)
-
-  ;; Ask AWS to describe the key that was just created
-  (def reply
-    (aws/invoke ec2 {:op :DescribeKeyPairs
-                     :request {:KeyNames ["orange-test-instance-key"]}
-                     }))
-
-  ;; Get the ID of the key
-  (def key-id
-    (-> reply
-        (get-in [:KeyPairs 0 :KeyPairId])))
-
-  (def key-reply
-    (aws/invoke ssm {:op :GetParameter
-                     :request {:Name (str "/ec2/keypair/" key-id)
-                               :WithDecryption true}}))
-
-  (spit (u/expand-home (str "~/.ssh/" "orange-test-instance-key")) (get-in key-reply [:Parameter :Value]))
-
-
-
-  ;; Fetch the newly created key
-  (def ssm (aws-client :ssm))
-
-  (aws/doc ssm :GetParameter)
-
-  (aws/doc cf :ListStackResources)
-  (aws/invoke cf {:op :ListStackResources
-                  :request {:StackName "orange-test"}
-                  })
-
-
-
-  ;; Watch and wait for the creation to complete
   (if (:StackId create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
-    create-result
-    )
+    create-result)
 
   )

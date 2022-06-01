@@ -4,6 +4,7 @@
             [clojure.walk :refer [postwalk]]
             [clojure.spec.alpha :as s]
             [odie.sokoban.utils :as u]
+            [odie.sokoban.globals :as g]
             [cognitect.aws.client.api :as aws]
             ))
 
@@ -47,6 +48,14 @@
              last-vals (u/str-split-first (last vals) "/")]
          (concat (butlast vals) last-vals))))))
 
+(defn aws-error?
+  "Check if a reply from AWS represents some kind of error."
+  [o]
+  (= (:cognitect.anomalies/category o) :cognitect.anomalies/incorrect))
+
+(defn aws-client [api-kw]
+  (aws/client {:api api-kw
+               :credentials-provider @g/credentials-provider}))
 
 (defn aws-ops
   "Given a client, list all the available operation as a list of keywords. This is useful for interactive exploration."

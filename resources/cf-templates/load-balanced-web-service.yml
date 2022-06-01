@@ -49,11 +49,14 @@ Parameters:
   Stickiness:
     Type: String
     Default: false
+  LaunchType:
+    Type: String
 Conditions:
   IsDefaultRootPath: !Equals [!Ref RulePath, "/"]
   HasAssociatedDomain: !Equals [!Ref DNSDelegated, true]
   HasAddons: !Not [!Equals [!Ref AddonsTemplateURL, ""]]
   HasEnvFile: !Not [!Equals [!Ref EnvFileARN, ""]]
+  IsEC2: !Equals [!Ref LaunchType, "EC2"]
 Resources: # If a bucket URL is specified, that means the template exists.
   LogGroup:
     Metadata:
@@ -70,8 +73,8 @@ Resources: # If a bucket URL is specified, that means the template exists.
     Properties:
       Family: !Join ['', [!Ref AppName, '-', !Ref EnvName, '-', !Ref WorkloadName]]
       NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
+      # RequiresCompatibilities:
+      #   - FARGATE
       Cpu: !Ref TaskCPU
       Memory: !Ref TaskMemory
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
@@ -106,7 +109,7 @@ Resources: # If a bucket URL is specified, that means the template exists.
             - ContainerPort: !Ref ContainerPort
   ExecutionRole:
     Metadata:
-      'sokoban:description': 'An IAM Role for the Fargate agent to make AWS API calls on your behalf'
+      'sokoban:description': 'An IAM Role for the ECS container agent to make AWS API calls on your behalf'
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -295,7 +298,10 @@ Resources: # If a bucket URL is specified, that means the template exists.
     DependsOn:
       - HTTPListenerRule
     Properties:
-      PlatformVersion: LATEST
+      PlatformVersion: !If
+        - IsEC2
+        - !Ref AWS::NoValue
+        - LATEST
       Cluster:
         Fn::ImportValue: !Sub '${AppName}-${EnvName}-ClusterId'
       TaskDefinition: !Ref TaskDefinition
@@ -308,10 +314,13 @@ Resources: # If a bucket URL is specified, that means the template exists.
         MaximumPercent: 200
       PropagateTags: SERVICE
       EnableExecuteCommand: true
-      LaunchType: FARGATE
+      LaunchType: !Ref LaunchType
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: !If
+            - IsEC2
+            - DISABLED
+            - ENABLED
           Subnets:
             Fn::Split:
               - ','
