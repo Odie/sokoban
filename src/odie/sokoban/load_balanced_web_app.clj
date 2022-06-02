@@ -99,30 +99,23 @@
 (defn cf-watch-for-stack-completion [cf stackname]
   (let [start-time (System/nanoTime)
         result (loop []
-                 (let [reply (cf-fetch-stack-status cf stackname)]
+                 (au/aws-when-let*
+                  [reply (cf-fetch-stack-status cf stackname)
+                   summaries (:StackResourceSummaries reply)
+                   stack (get-in reply [:Stacks 0])
+                   data (concat [{:LogicalResourceId (format "%s stack" (:StackName stack))
+                                  :ResourceStatus (:StackStatus stack)}]
+                                (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))]
 
-                   ;; If we can't fetch the summaries for some reason...
-                   (if (au/aws-error? reply)
+                  ;; Print it
+                  (clojure.pprint/print-table data)
 
-                     ;; Just return whatever AWS sent us
-                     reply
-
-                     ;; We can fetch the summaries...
-                     (let [summaries (:StackResourceSummaries reply)
-                           stack (get-in reply [:Stacks 0])
-
-                           data (concat [{:LogicalResourceId (format "%s stack" (:StackName stack))
-                                          :ResourceStatus (:StackStatus stack)}]
-                                        (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))]
-                       ;; Print it
-                       (clojure.pprint/print-table data)
-
-                       ;; Keep looping every few seconds until everything has either been
-                       ;; created or deleted (in case there is an error).
-                       (if (not (every? #(resource-op-complete? %) data))
-                         (do
-                           (Thread/sleep 5000)
-                           (recur)))))))]
+                  ;; Keep looping every few seconds until everything has either been
+                  ;; created or deleted (in case there is an error).
+                  (if (not (every? #(resource-op-complete? %) data))
+                    (do
+                      (Thread/sleep 5000)
+                      (recur)))))]
 
     (println (format "Waited %.2f seconds" (float (/ (- (System/nanoTime) start-time) 1000000000))))
     result))
@@ -143,63 +136,66 @@
                        :sokoban-service WorkloadName
                        })}))
 
+(defn setup-service--req-data [params]
+  (let [{:keys [AppName EnvName WorkloadName]} params]
+    {:StackName (format "%s-%s-%s" AppName EnvName WorkloadName)
+     :Capabilities ["CAPABILITY_NAMED_IAM"]
+     :TemplateBody (slurp (io/resource "cf-templates/service.yml"))
+     :Parameters (au/->params params)
+     :Tags (au/->tags {:sokoban-application AppName
+                       :sokoban-environment EnvName
+                       :sokoban-service WorkloadName
+                       })}))
 
 (defn keypair-by-name
   "Given the name of a keypair, try to locate its secret key in SSM"
   [n]
 
-  (let [ec2 (au/aws-client :ec2)
+  (au/aws-when-let*
+   [ec2 (au/aws-client :ec2)
 
-        ;; Ask EC2 about the keypair
-        keypair-reply (aws/invoke ec2 {:op :DescribeKeyPairs
-                                       :request {:KeyNames [n]}})]
+    ;; Ask EC2 about the keypair
+    keypair-reply (aws/invoke ec2 {:op :DescribeKeyPairs
+                                   :request {:KeyNames [n]}})
 
-    (if (au/aws-error? keypair-reply)
-      keypair-reply
+    ;; Get the ID of the key
+    key-id (get-in keypair-reply [:KeyPairs 0 :KeyPairId])
 
-      (let [;; Get the ID of the key
-            key-id (get-in keypair-reply [:KeyPairs 0 :KeyPairId])
+    ssm (au/aws-client :ssm)
 
-            ssm (au/aws-client :ssm)
+    ;; Ask SSM about the key
+    key-reply (aws/invoke ssm {:op :GetParameter
+                               :request {:Name (str "/ec2/keypair/" key-id)
+                                         :WithDecryption true}})]
+   (get-in key-reply [:Parameter :Value])))
 
-            ;; Ask SSM about the key
-            key-reply (aws/invoke ssm {:op :GetParameter
-                                       :request {:Name (str "/ec2/keypair/" key-id)
-                                                 :WithDecryption true}})]
-
-        (if (au/aws-error? key-reply)
-          key-reply
-
-          (get-in key-reply [:Parameter :Value]))))))
 
 (defn cluster-instance-key
   "Given the name of a ECS EC2 stack, return the private key instance key"
   [stack-name]
 
-  (let [cf (au/aws-client :cloudformation)
+  (au/aws-when-let*
+   [cf (au/aws-client :cloudformation)
 
-        keypair-res-reply (aws/invoke cf {:op :DescribeStackResource
-                                          :request {:StackName stack-name
-                                                    :LogicalResourceId "EcsInstanceKeyPair"}})]
-    (if (au/aws-error? keypair-res-reply)
-      keypair-res-reply
+    keypair-res-reply (aws/invoke cf {:op :DescribeStackResource
+                                      :request {:StackName stack-name
+                                                :LogicalResourceId "EcsInstanceKeyPair"}})]
+   (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId]))))
 
-      (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId])))))
+(cluster-instance-key "orange-test")
 
 (defn services-set-desired-count [cluster-name desired-count]
-  (let [ecs (au/aws-client :ecs)
-        reply (aws/invoke ecs {:op :ListServices
-                               :request {:cluster cluster-name}})]
+  (au/aws-when-let*
+   [ecs (au/aws-client :ecs)
+    reply (aws/invoke ecs {:op :ListServices
+                           :request {:cluster cluster-name}})]
 
-    (if (au/aws-error? reply)
-      reply
-
-      (->> (:serviceArns reply)
-           (map (fn [srv]
-                  (aws/invoke ecs {:op :UpdateService
-                                   :request {:service srv
-                                             :cluster cluster-name
-                                             :desiredCount desired-count}})))))))
+   (->> (:serviceArns reply)
+        (map (fn [srv]
+               (aws/invoke ecs {:op :UpdateService
+                                :request {:service srv
+                                          :cluster cluster-name
+                                          :desiredCount desired-count}}))))))
 
 (defn fetch-my-ip []
   (let [response (hc/get "http://checkip.amazonaws.com/")]
@@ -209,8 +205,9 @@
 (def my-ip (memoize fetch-my-ip))
 
 (defn fetch-stack [stack-name]
-  (au/aws-when-let
-   [reply (aws/invoke cf {:op :DescribeStacks
+  (au/aws-when-let*
+   [cf (au/aws-client :cloudformation)
+    reply (aws/invoke cf {:op :DescribeStacks
                           :request {:StackName stack-name}})]
    (get-in reply [:Stacks 0])))
 
@@ -239,7 +236,8 @@
 
 (defn stack-open-ssh-port [stack ip description]
   (let [ssh-permission (make-ssh-ip-permission ip description)
-        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")]
+        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")
+        ec2 (au/aws-client :ec2)]
 
     ;; Add a rule to the security group
     (au/aws-when-let
@@ -254,20 +252,91 @@
 
 (defn stack-close-ssh-port [stack ip]
   (let [ssh-permission (make-ssh-ip-permission ip nil)
-        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")]
+        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")
+        ec2 (au/aws-client :ec2)]
 
     ;; Remove the rule from the security group
     (aws/invoke ec2 {:op :RevokeSecurityGroupIngress
                      :request {:GroupId sec-group-id
                                :IpPermissions [ssh-permission]}})))
 
-(comment
+(defn stack-set-capacity-provider-desired-count [stack n]
+  (au/aws-when-let*
+   [ecs (au/aws-client :ecs)
+    ;; Get the cluster
+    cluster-resp (aws/invoke ecs {:op :DescribeClusters
+                                  :request {:clusters [(stack-outputs-get stack "ClusterId")]}})
+    cluster (get-in cluster-resp [:clusters 0])
 
-  (defmacro when
-    "Evaluates test. If logical true, evaluates body in an implicit do."
-    {:added "1.0"}
-    [test & body]
-    (list 'if test (cons 'do body)))
+    ;; Get the capacity provider
+    provider-resp (aws/invoke ecs {:op :DescribeCapacityProviders
+                                   :request {:capacityProviders (:capacityProviders cluster)}})
+    as-name (get-in provider-resp [:capacityProviders 0 :autoScalingGroupProvider :autoScalingGroupArn])
+
+    as (au/aws-client :autoscaling)
+
+    ;; Get the autoscaling group
+    groups (aws/invoke as {:op :DescribeAutoScalingGroups
+                           :request {}})
+
+    asg (u/find-first #(= (:AutoScalingGroupARN %) as-name)
+                      (:AutoScalingGroups groups))]
+
+   ;; Set the desired count on the provider
+   (aws/invoke as {:op :UpdateAutoScalingGroup
+                   :request {:AutoScalingGroupName (:AutoScalingGroupName asg)
+                             :DesiredCapacity n}})))
+
+
+;; (aws/doc ecs :UpdateAutoScalingGroup)
+
+;; (defn stack-draw-down-all-ec2-instances [stack]
+;;   ;; Get the cluster
+;;   (au/aws-when-let*
+;;    [cluster-resp (aws/invoke ecs {:op :DescribeClusters
+;;                                   :request {:clusters [(stack-outputs-get stack "ClusterId")]}})
+;;     ]
+
+;;    (let [cluster (get-in cluster-resp [:clusters 0])]
+
+;;      ;; Get the capacity provider
+;;      (au/aws-when-let
+;;       [provider-resp (aws/invoke ecs {:op :DescribeCapacityProviders
+;;                                     :request {:capacityProviders (:capacityProviders cluster)}})]
+
+;;       (let [provider (get-in provider-resp [:capacityProviders 0 :capacityProviderArn])]
+
+;;         ;; Get the autoscaling group
+;;         (au/aws-when-let
+;;          [asg (aws/invoke ecs {:op :ListAuto
+;;                                :request {:capacityProviders (:capacityProviders cluster)}})]
+
+;;         )
+
+
+;;      )
+;;      )
+
+
+;;    )
+
+
+  ;; (def cluster-resp
+  ;;   (aws/invoke ecs {:op :DescribeClusters
+  ;;                    :request {:clusters [(stack-outputs-get stack "ClusterId")]}}))
+
+  ;; (def cluster (get-in cluster-resp [:clusters 0]))
+
+  ;; (aws/doc ecs :DescribeCapacityProviders )
+
+  ;; (aws/invoke ecs {:op :DescribeCapacityProviders
+  ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
+
+  ;; (aws/invoke ecs {:op :DescribeCapacityProviders
+  ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
+  ;; )
+
+(comment
 
   (keypair-by-name "orange-test-instance-key")
   (cluster-instance-key "orange-test")

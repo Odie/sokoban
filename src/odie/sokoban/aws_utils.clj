@@ -83,6 +83,23 @@
          (let [~form temp#]
            ~@body)))))
 
+(defmacro aws-when-let*
+  "bindings => binding-form test
+  When test is true, evaluates body with binding-form bound to the value of test"
+  [bindings & body]
+  (assert-args
+   (vector? bindings) "a vector for its binding"
+   (< 1 (count bindings)) "at least 2 forms in binding vector"
+   (= 0 (mod (count bindings) 2)) "even number of forms in binding vector")
+  (let [form (bindings 0) tst (bindings 1) more (vec (drop 2 bindings))]
+    `(let [temp# ~tst]
+       (if (or (aws-error? temp#) (nil? temp#))
+         temp#
+         (let [~form temp#]
+           ~(if (seq more)
+              `(aws-when-let* ~more ~@body)
+              `(do ~@body)))))))
+
 (defn aws-ops
   "Given a client, list all the available operation as a list of keywords. This is useful for interactive exploration."
   [client]

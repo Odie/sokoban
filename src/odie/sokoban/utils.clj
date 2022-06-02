@@ -38,3 +38,8 @@
 
     ;; Otherwise, say why it's not on spec
     (s/explain-data spec data)))
+
+(defn find-first
+  "Find the first item in the collection that matches the predicate"
+  [pred coll]
+  (some #(when (pred %) %) coll))
