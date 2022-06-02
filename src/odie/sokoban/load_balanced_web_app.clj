@@ -345,7 +345,22 @@
                   :request {:StackName "orange-test"}
                   })
 
-  (dev/dev-start-app!)
+  ;; Setup the dev environment
+  (do
+    (dev/dev-start-app!)
+    (g/set-app-name! "orange")
+
+    (def ec2 (au/aws-client :ec2))
+    (aws/validate-requests ec2)
+
+    (def cf (au/aws-client :cloudformation))
+    (aws/validate-requests cf)
+
+    (def stack (fetch-stack "orange-test"))
+
+    (def as (au/aws-client :autoscaling))
+
+    )
 
   (aws/doc cf :ListStackResources)
   (aws/doc cf :DescribeStackResource)
@@ -393,7 +408,6 @@
 
   (aws/validate-requests cf)
 
-  (g/set-app-name! "orange")
 
   (aws/invoke cf {:op :ListStacks})
 
