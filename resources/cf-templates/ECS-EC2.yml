@@ -419,7 +419,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Condition: CreateEFS
     Properties:
-      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvironmentName, EFSSecurityGroup]]
+      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvironmentName, '-', EFSSecurityGroup]]
       VpcId: !Ref VPC
       Tags:
         - Key: Name
