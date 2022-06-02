@@ -942,6 +942,7 @@ Resources:
       EbsOptimized: true
       UserData:
         Fn::Base64: !Ref UserData
+      SecurityGroups: [ !Ref EnvironmentSecurityGroup ]
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
