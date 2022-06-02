@@ -303,7 +303,7 @@ Resources:
       'sokoban:description': 'A security group to allow your containers to talk to each other'
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvironmentName, EnvironmentSecurityGroup]]
+      GroupDescription: !Sub ${AWS::StackName}-EnvironmentSecurityGroup
       VpcId: !Ref VPC
       Tags:
         - Key: Name
