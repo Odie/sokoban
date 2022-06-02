@@ -578,4 +578,9 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   (stack-close-ssh-port stack (my-ip))
 
+  ;; Manually change how many ec2 instances we're running
+  (stack-set-capacity-provider-desired-count stack 0)
+
+  (stack-set-capacity-provider-desired-count stack 1)
+
 )

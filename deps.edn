@@ -11,6 +11,7 @@
         com.cognitect.aws/kms       {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/lightsail {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/ssm       {:mvn/version "822.2.1145.0"},
+        com.cognitect.aws/autoscaling {:mvn/version "822.2.1122.0"}
         hato/hato                   {:mvn/version "0.8.2"}
         }
  :aliases
