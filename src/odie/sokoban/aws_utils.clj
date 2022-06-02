@@ -57,6 +57,32 @@
   (aws/client {:api api-kw
                :credentials-provider @g/credentials-provider}))
 
+;; Ripped from clojure src
+(defmacro ^{:private true} assert-args
+  [& pairs]
+  `(do (when-not ~(first pairs)
+         (throw (IllegalArgumentException.
+                 (str (first ~'&form) " requires " ~(second pairs) " in " ~'*ns* ":" (:line (meta ~'&form))))))
+       ~(let [more (nnext pairs)]
+          (when more
+            (list* `assert-args more)))))
+
+(defmacro aws-when-let
+  "Like when-let, but only continues with body if the aws/invoke call in the
+  bindings succeeds. Otherwise, return the error."
+  {:added "1.0"}
+  [bindings & body]
+  (assert-args
+   (vector? bindings) "a vector for its binding"
+   (= 2 (count bindings)) "exactly 2 forms in binding vector")
+  (let [form (bindings 0)
+        tst (bindings 1)]
+    `(let [temp# ~tst]
+       (if (aws-error? temp#)
+         temp#
+         (let [~form temp#]
+           ~@body)))))
+
 (defn aws-ops
   "Given a client, list all the available operation as a list of keywords. This is useful for interactive exploration."
   [client]

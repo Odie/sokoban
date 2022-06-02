@@ -5,13 +5,14 @@
             [cognitect.aws.client.api :as aws]
             [odie.sokoban.globals :as g]
             [odie.sokoban.dev :as dev]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [hato.client :as hc]
+            ))
 
 ;; Steps
 ;; 1. Setup roles
 ;; 2. Setup common resources
 ;; 3. Setup load balanced web service
-
 
 (defn setup-roles--req-data [{:keys [app-name account-id]}]
   {:StackName (str app-name "-infrastructure-roles")
@@ -185,7 +186,88 @@
 
       (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId])))))
 
+(defn services-set-desired-count [cluster-name desired-count]
+  (let [ecs (au/aws-client :ecs)
+        reply (aws/invoke ecs {:op :ListServices
+                               :request {:cluster cluster-name}})]
+
+    (if (au/aws-error? reply)
+      reply
+
+      (->> (:serviceArns reply)
+           (map (fn [srv]
+                  (aws/invoke ecs {:op :UpdateService
+                                   :request {:service srv
+                                             :cluster cluster-name
+                                             :desiredCount desired-count}})))))))
+
+(defn fetch-my-ip []
+  (let [response (hc/get "http://checkip.amazonaws.com/")]
+    (when (= (:status response) 200)
+      (str/trim (:body response)))))
+
+(def my-ip (memoize fetch-my-ip))
+
+(defn fetch-stack [stack-name]
+  (au/aws-when-let
+   [reply (aws/invoke cf {:op :DescribeStacks
+                          :request {:StackName stack-name}})]
+   (get-in reply [:Stacks 0])))
+
+(defn stack-outputs-get-entry [stack keyname]
+  (some #(when (= (:OutputKey %) keyname)
+           %)
+        (:Outputs stack)))
+
+(defn stack-outputs-get [stack keyname]
+  (->> (:Outputs stack)
+       (some #(when (= (:OutputKey %) keyname)
+                %))
+       :OutputValue))
+
+(defn stack-outputs->map [stack]
+  (->> (:Outputs stack)
+       (map #(vector (:OutputKey %) (:OutputValue %)))
+       (into {})))
+
+(defn make-ssh-ip-permission [ip description]
+  {:IpProtocol "tcp"
+   :FromPort 22
+   :ToPort 22
+   :IpRanges [(cond-> {:CidrIp (str ip "/32")}
+               description (assoc :Description description))]})
+
+(defn stack-open-ssh-port [stack ip description]
+  (let [ssh-permission (make-ssh-ip-permission ip description)
+        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")]
+
+    ;; Add a rule to the security group
+    (au/aws-when-let
+     [auth-reply (aws/invoke ec2 {:op :AuthorizeSecurityGroupIngress
+                                  :request {:GroupId sec-group-id
+                                            :IpPermissions [ssh-permission]}})]
+
+     ;; Add a description
+     (aws/invoke ec2 {:op :UpdateSecurityGroupRuleDescriptionsIngress
+                      :request {:GroupId sec-group-id
+                                :IpPermissions [ssh-permission]}}))))
+
+(defn stack-close-ssh-port [stack ip]
+  (let [ssh-permission (make-ssh-ip-permission ip nil)
+        sec-group-id (stack-outputs-get stack "EnvironmentSecurityGroup")]
+
+    ;; Remove the rule from the security group
+    (aws/invoke ec2 {:op :RevokeSecurityGroupIngress
+                     :request {:GroupId sec-group-id
+                               :IpPermissions [ssh-permission]}})))
+
 (comment
+
+  (defmacro when
+    "Evaluates test. If logical true, evaluates body in an implicit do."
+    {:added "1.0"}
+    [test & body]
+    (list 'if test (cons 'do body)))
 
   (keypair-by-name "orange-test-instance-key")
   (cluster-instance-key "orange-test")
@@ -371,4 +453,60 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
-  )
+  (cluster-instance-key "orange-test")
+
+  (def ecs (au/aws-client :ecs))
+
+  (aws/validate-requests ecs)
+
+  (aws/doc ecs :UpdateService)
+
+  (u/on-spec? (aws/request-spec-key ecs :UpdateService)
+              {:service "abc"
+               :desiredCount 1}
+              )
+
+  (aws/invoke ecs {:op :UpdateService
+                   :request {:service srv
+                             :desiredCount 1}})
+
+  (aws/invoke ecs {:op :ListServices
+                   :request {:cluster "orange-test"}})
+
+  (let [services (aws/invoke ecs {:op :ListServices
+                                  :request {:cluster "orange-test"}})]
+    (doseq [srv (:serviceArns)]
+      (aws/invoke ecs {:op :UpdateService
+                       :request {:service srv
+                                 :desiredCount 1}})))
+
+
+  (aws/doc cf :ListStackResources)
+
+  (aws/invoke cf {:op :ListStacks})
+
+  (def resp
+    (aws/invoke cf {:op :DescribeStacks
+                    :request {:StackName "orange-test"}}))
+
+  (def stack (fetch-stack "orange-test"))
+
+  (stack-outputs-get stack "EnvironmentSecurityGroup")
+
+
+  ;; Turn on all services
+  (services-set-desired-count "orange-test" 1)
+
+  ;; Turn off all services
+  (services-set-desired-count "orange-test" 0)
+
+  ;; Turn on all services
+  (services-set-desired-count "orange-test" 1)
+
+  ;; Turn off all services
+  (services-set-desired-count "orange-test" 0)
+  (stack-open-ssh-port stack (my-ip) "SSH for Jonathan")
+
+  (stack-close-ssh-port stack (my-ip))
+
+)

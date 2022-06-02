@@ -11,7 +11,8 @@
         com.cognitect.aws/kms       {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/lightsail {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/ssm       {:mvn/version "822.2.1145.0"},
-        phrase/phrase               {:mvn/version "0.3-alpha4"}}
+        hato/hato                   {:mvn/version "0.8.2"}
+        }
  :aliases
  {:run-m {:main-opts ["-m" "odie.sokoban"]}
   :run-x {:ns-default odie.sokoban

@@ -7,7 +7,6 @@
             [cognitect.aws.credentials :as credentials]
             [clojure.spec.alpha :as s]
             [clojure.walk :refer [postwalk]]
-            [phrase.alpha :refer [phrase-first]]
             [odie.sokoban.globals :as g]
             [odie.sokoban.utils :as u]
             [odie.sokoban.aws-utils :as au]
