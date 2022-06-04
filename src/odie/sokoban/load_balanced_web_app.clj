@@ -7,7 +7,28 @@
             [odie.sokoban.dev :as dev]
             [clojure.string :as str]
             [hato.client :as hc]
+            [me.raynes.fs :as fs]
             ))
+
+;; Emulating the way aws copilot works...
+;; We setup all the different services as stacks of their own, with related resources
+;; that are controlled together.
+;; We always start with a 'base stack' which sets up the ECS cluster.
+
+(defn make-base-stack-name [app-name env-name]
+  (format "%s-%s" app-name env-name))
+
+(defn base-stack-name
+  ([]
+   (base-stack-name @g/app-context))
+  ([context]
+   (make-base-stack-name (:app-name context) (:env-name context))))
+
+(defn make-cluster-name [context]
+  (format "%s-%s" (:app-name context) (:env-name context)))
+
+(defn make-service-name [context svr-name]
+  (format "%s-%s-%s" (:app-name context) (:env-name context) svr-name))
 
 ;; Steps
 ;; 1. Setup roles
@@ -336,14 +357,6 @@
   ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
   ;; )
 
-(defn make-stack-name [context]
-  (format "%s-%s" (:app-name context) (:env-name context)))
-
-(defn make-cluster-name [context]
-  (format "%s-%s" (:app-name context) (:env-name context)))
-
-(defn make-service-name [context svr-name]
-  (format "%s-%s-%s" (:app-name context) (:env-name context) svr-name))
 
 (defn service-by-name [context service-name]
   (au/aws-when-let*
@@ -389,7 +402,7 @@
     ;; One way is to the use `service-by-name` so we can be very sure of the
     ;; service we're deploying. Though that might itself become problematic
     ;; if there is a large number of services in the cluster.
-    target-subs  (str (make-service-name context "api") "-Service")
+    target-subs  (str (make-service-name context service-name) "-Service")
     target (u/find-first #(str/includes? % target-subs) service-arns)]
    (println "Redeploying: " target)
    (aws/invoke ecs {:op :UpdateService
@@ -494,11 +507,11 @@
 
   ;; Step 2a: Setup ECS Fargate cluster
   (def create-result
-    (let [environment "test"
+    (let [environment (:env-name @g/app-context)
           app-name (:app-name @g/app-context)
           account-id (:account-id @g/app-context)
           params {:AppName app-name
-                  :EnvironmentName environment
+                  :EnvName environment
                   :ALBWorkloads "api"
                   ;; EFSWorkloads:
                   ;; Type: String
@@ -529,11 +542,11 @@
 
   ;; Step 2b: Setup ECS EC2 cluster
   (def create-result
-    (let [environment "test"
+    (let [environment (:env-name @g/app-context)
           app-name (:app-name @g/app-context)
           account-id (:account-id @g/app-context)
           params {:AppName app-name
-                  :EnvironmentName environment
+                  :EnvName environment
                   :ALBWorkloads "api"
                   ;; EFSWorkloads:
                   ;; Type: String
@@ -574,7 +587,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   ;; Step 3: Setup load-balanced web service
   (def create-result
-    (let [environment "test"
+    (let [environment (:env-name @g/app-context)
           app-name (:app-name @g/app-context)
           account-id (:account-id @g/app-context)
           service-name "api"
@@ -608,7 +621,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   ;; Step 4: Setup internal services
   (def create-result
-    (let [environment "test"
+    (let [environment (:env-name @g/app-context)
           app-name (:app-name @g/app-context)
           account-id (:account-id @g/app-context)
           service-name "cache"
@@ -639,54 +652,32 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
+  ;;---------------------------------------------------------------------
+  ;; Misc actions
 
+  ;; Grab SSH key
+  ;; Grab the instance key and place it into the user's .ssh directory
+  ;; WARNING: We're just overwriting without any warning here
+  (let [stack-name (base-stack-name @g/app-context)
+        key-fpath (u/expand-home (format "~/.ssh/%s-instance-key.pem" stack-name))]
 
-  (cluster-instance-key "orange-test")
+    (spit key-fpath (cluster-instance-key (base-stack-name @g/app-context)))
+    (fs/chmod "600" key-fpath))
 
   (def ecs (au/aws-client :ecs))
 
   (aws/validate-requests ecs)
 
-  (aws/doc ecs :UpdateService)
-
-  (u/on-spec? (aws/request-spec-key ecs :UpdateService)
-              {:service "abc"
-               :desiredCount 1}
-              )
-
-  (aws/invoke ecs {:op :UpdateService
-                   :request {:service srv
-                             :desiredCount 1}})
-
-  (aws/invoke ecs {:op :ListServices
-                   :request {:cluster "orange-test"}})
-
-  (let [services (aws/invoke ecs {:op :ListServices
-                                  :request {:cluster "orange-test"}})]
-    (doseq [srv (:serviceArns)]
-      (aws/invoke ecs {:op :UpdateService
-                       :request {:service srv
-                                 :desiredCount 1}})))
-
-
-  (aws/doc cf :ListStackResources)
-
-  (aws/invoke cf {:op :ListStacks})
-
-  (def resp
-    (aws/invoke cf {:op :DescribeStacks
-                    :request {:StackName "orange-test"}}))
-
-  (def stack (fetch-stack "orange-test"))
+  (def stack (fetch-stack (base-stack-name)))
 
   (stack-outputs-get stack "EnvironmentSecurityGroup")
 
 
   ;; Turn on all services
-  (services-set-desired-count "orange-test" 1)
+  (services-set-desired-count (base-stack-name) 1)
 
   ;; Turn off all services
-  (services-set-desired-count "orange-test" 0)
+  (services-set-desired-count (base-stack-name) 0)
 
   (stack-open-ssh-port stack (my-ip) "SSH for Jonathan")
 
@@ -700,7 +691,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   (fetch-stack "docker")
   (services-set-desired-count "docker" 0)
 
-  (services-force)
+  (service-redeploy-with-latest-image @g/app-context "api")
 
   (au/aws-when-let*
    [cluster-name (make-cluster-name @g/app-context)
