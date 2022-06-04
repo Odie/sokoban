@@ -51,6 +51,8 @@ Parameters:
     Default: false
   LaunchType:
     Type: String
+  ServiceDiscoveryEndpoint:
+    Type: String
 Conditions:
   IsDefaultRootPath: !Equals [!Ref RulePath, "/"]
   HasAssociatedDomain: !Equals [!Ref DNSDelegated, true]
@@ -86,7 +88,8 @@ Resources: # If a bucket URL is specified, that means the template exists.
             - Name: SOKOBAN_APPLICATION_NAME
               Value: !Sub '${AppName}'
             - Name: SOKOBAN_SERVICE_DISCOVERY_ENDPOINT
-              Value: test.demo.local
+              Value:
+                Fn::ImportValue: !Sub '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'
             - Name: SOKOBAN_ENVIRONMENT_NAME
               Value: !Sub '${EnvName}'
             - Name: SOKOBAN_SERVICE_NAME
@@ -107,6 +110,11 @@ Resources: # If a bucket URL is specified, that means the template exists.
               awslogs-stream-prefix: sokoban
           PortMappings:
             - ContainerPort: !Ref ContainerPort
+          Environment:
+            - Name: "SEARCH_DOMAIN"
+              Value:
+                Fn::ImportValue: !Sub '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'
+
   ExecutionRole:
     Metadata:
       'sokoban:description': 'An IAM Role for the ECS container agent to make AWS API calls on your behalf'

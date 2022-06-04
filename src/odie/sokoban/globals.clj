@@ -8,6 +8,9 @@
 (defn set-app-name! [s]
   (swap! app-context assoc :app-name s))
 
+(defn set-env-name! [s]
+  (swap! app-context assoc :env-name s))
+
 (defn set-account-id! [s]
   (swap! app-context assoc :account-id s))
 

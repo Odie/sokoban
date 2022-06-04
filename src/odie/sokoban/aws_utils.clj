@@ -131,3 +131,17 @@
   "Given a map, shape it to be accepted as tags in AWS API calls"
   [m]
   (map (fn [[k v]] (tag k v)) m))
+
+(defn tags-get
+  "Given an list of tags sent back by aws, try to retrieve the :value of the given keyname."
+  [tags keyname]
+
+  (let [pair (u/find-first #(= (or (:key %) (:Key %)) keyname) tags)]
+    (:value pair)))
+
+(defn tags->map
+  "Given a list of tags, return the equivalent map"
+  [tags]
+  (->> tags
+       (map #(vector (keyword (or (:key %) (:Key %))) (or (:value %) (:Value %))))
+       (into {})))

@@ -988,6 +988,10 @@ Outputs:
     Value: !Ref PublicRouteTable
     Export:
       Name: !Sub ${AWS::StackName}-PublicRouteTableID
+  ServiceDiscoveryEndpoint:
+    Value: !GetAtt ServiceDiscoveryNamespace.Name
+    Export:
+      Name: !Sub ${AWS::StackName}-ServiceDiscoveryEndpoint
   ServiceDiscoveryNamespaceID:
     Value: !GetAtt ServiceDiscoveryNamespace.Id
     Export:

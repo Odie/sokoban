@@ -336,7 +336,75 @@
   ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
   ;; )
 
+(defn make-stack-name [context]
+  (format "%s-%s" (:app-name context) (:env-name context)))
+
+(defn make-cluster-name [context]
+  (format "%s-%s" (:app-name context) (:env-name context)))
+
+(defn make-service-name [context svr-name]
+  (format "%s-%s-%s" (:app-name context) (:env-name context) svr-name))
+
+(defn service-by-name [context service-name]
+  (au/aws-when-let*
+   [cluster-name (make-cluster-name context)
+    ecs (au/aws-client :ecs)
+
+    ;; Grab a list of services in the cluster
+    reply (aws/invoke ecs {:op :ListServices
+                           :request {:cluster cluster-name}})
+    service-arns (:serviceArns reply)
+
+    ;; Grab the service details, including tags
+    services-reply (aws/invoke ecs {:op :DescribeServices
+                                    :request {:cluster cluster-name
+                                              :services service-arns
+                                              :include ["TAGS"]}})
+    services (:services services-reply)
+
+    ;; We're looking for a service that matches these entries
+    target-map {:sokoban-service service-name
+                :sokoban-application (:app-name @g/app-context)
+                :sokoban-environment (:env-name @g/app-context)}]
+
+   ;; Retrieve the tags of the service as a map
+   ;; Grab all entries in the target map
+   ;; If the resulting map is the same as the target map, we
+   ;; found the service we're looking for
+   (->> services
+        (u/find-first #(= target-map
+                          (select-keys (au/tags->map (:tags %))
+                                       (keys target-map)))))))
+
+(defn service-redeploy-with-latest-image [context service-name]
+  (au/aws-when-let*
+   [cluster-name (make-cluster-name context)
+    ecs (au/aws-client :ecs)
+    reply (aws/invoke ecs {:op :ListServices
+                           :request {:cluster cluster-name}})
+    service-arns (:serviceArns reply)
+
+    ;; FIXME? Trying to identify the right service through ARN string matching?
+    ;; It'd be better to match against something we have explicit control over.
+    ;; One way is to the use `service-by-name` so we can be very sure of the
+    ;; service we're deploying. Though that might itself become problematic
+    ;; if there is a large number of services in the cluster.
+    target-subs  (str (make-service-name context "api") "-Service")
+    target (u/find-first #(str/includes? % target-subs) service-arns)]
+   (println "Redeploying: " target)
+   (aws/invoke ecs {:op :UpdateService
+                    :request {:service target
+                              :cluster cluster-name
+                              :forceNewDeployment true}})
+  ))
+
 (comment
+
+  (service-redeploy-with-latest-image @g/app-context "api")
+
+  (count services)
+
+  (get services 0)
 
   (keypair-by-name "orange-test-instance-key")
   (cluster-instance-key "orange-test")
@@ -349,6 +417,7 @@
   (do
     (dev/dev-start-app!)
     (g/set-app-name! "orange")
+    (g/set-env-name! "test")
 
     (def ec2 (au/aws-client :ec2))
     (aws/validate-requests ec2)
@@ -512,14 +581,15 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
           params {:AppName app-name
                   :EnvName environment
                   :WorkloadName service-name
-                  :ContainerImage "044973601964.dkr.ecr.us-west-1.amazonaws.com/demo/api:cee7709"
-                  :ContainerPort "80"
+                  :ContainerImage "044973601964.dkr.ecr.us-west-1.amazonaws.com/kengoson-backend"
+                  ;; "044973601964.dkr.ecr.us-west-1.amazonaws.com/demo/api:cee7709"
+                  :ContainerPort "8000"
                   :TaskCPU "256"
                   :TaskMemory "512"
                   :TaskCount "1"
                   :LogRetention "30"
                   :TargetContainer service-name
-                  :TargetPort "80"
+                  :TargetPort "8000"
                   :LaunchType "EC2"
                   }
           req (setup-load-balanced-web-service--req-data params)
@@ -535,6 +605,41 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   (if (:StackId create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
+
+  ;; Step 4: Setup internal services
+  (def create-result
+    (let [environment "test"
+          app-name (:app-name @g/app-context)
+          account-id (:account-id @g/app-context)
+          service-name "cache"
+          params {:AppName app-name
+                  :EnvName environment
+                  :WorkloadName service-name
+                  :ContainerImage "redis:7-alpine"
+                  :ContainerPort "6379"
+                  :TaskCPU "256"
+                  :TaskMemory "512"
+                  :TaskCount "1"
+                  :LogRetention "30"
+                  ;; :TargetContainer service-name
+                  ;; :TargetPort "5000"
+                  :LaunchType "EC2"
+                  }
+          req (setup-service--req-data params)
+          spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
+
+      ;; spec?
+      (if (true? spec?)
+        (cf-stack-ensure cf req)
+        spec?)
+      )
+    )
+
+  (if (:StackId create-result)
+    (cf-watch-for-stack-completion cf (:StackId create-result))
+    create-result)
+
+
 
   (cluster-instance-key "orange-test")
 
@@ -583,11 +688,6 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   ;; Turn off all services
   (services-set-desired-count "orange-test" 0)
 
-  ;; Turn on all services
-  (services-set-desired-count "orange-test" 1)
-
-  ;; Turn off all services
-  (services-set-desired-count "orange-test" 0)
   (stack-open-ssh-port stack (my-ip) "SSH for Jonathan")
 
   (stack-close-ssh-port stack (my-ip))
@@ -597,4 +697,25 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   (stack-set-capacity-provider-desired-count stack 1)
 
+  (fetch-stack "docker")
+  (services-set-desired-count "docker" 0)
+
+  (services-force)
+
+  (au/aws-when-let*
+   [cluster-name (make-cluster-name @g/app-context)
+    ecs (au/aws-client :ecs)
+    reply (aws/invoke ecs {:op :ListServices
+                           :request {:cluster cluster-name}})
+    service-arns (:serviceArns reply)
+
+    ;; FIXME!!! Trying to identify the right service through string matching
+    ;; This might be problematic if AWS ever changes the way they name the
+    ;; service based on the TaskDefinition
+    target-subs  (str (make-service-name @g/app-context "api") "-Service")
+    target (u/find-first #(str/includes? % target-subs) service-arns)]
+   (aws/invoke ecs {:op :UpdateService
+                    :request {:service target
+                              :cluster cluster-name
+                              :forceNewDeployment true}}))
 )
