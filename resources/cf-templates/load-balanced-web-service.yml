@@ -51,8 +51,6 @@ Parameters:
     Default: false
   LaunchType:
     Type: String
-  ServiceDiscoveryEndpoint:
-    Type: String
 Conditions:
   IsDefaultRootPath: !Equals [!Ref RulePath, "/"]
   HasAssociatedDomain: !Equals [!Ref DNSDelegated, true]
