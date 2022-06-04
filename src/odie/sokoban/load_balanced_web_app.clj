@@ -308,56 +308,6 @@
                    :request {:AutoScalingGroupName (:AutoScalingGroupName asg)
                              :DesiredCapacity n}})))
 
-
-;; (aws/doc ecs :UpdateAutoScalingGroup)
-
-;; (defn stack-draw-down-all-ec2-instances [stack]
-;;   ;; Get the cluster
-;;   (au/aws-when-let*
-;;    [cluster-resp (aws/invoke ecs {:op :DescribeClusters
-;;                                   :request {:clusters [(stack-outputs-get stack "ClusterId")]}})
-;;     ]
-
-;;    (let [cluster (get-in cluster-resp [:clusters 0])]
-
-;;      ;; Get the capacity provider
-;;      (au/aws-when-let
-;;       [provider-resp (aws/invoke ecs {:op :DescribeCapacityProviders
-;;                                     :request {:capacityProviders (:capacityProviders cluster)}})]
-
-;;       (let [provider (get-in provider-resp [:capacityProviders 0 :capacityProviderArn])]
-
-;;         ;; Get the autoscaling group
-;;         (au/aws-when-let
-;;          [asg (aws/invoke ecs {:op :ListAuto
-;;                                :request {:capacityProviders (:capacityProviders cluster)}})]
-
-;;         )
-
-
-;;      )
-;;      )
-
-
-;;    )
-
-
-  ;; (def cluster-resp
-  ;;   (aws/invoke ecs {:op :DescribeClusters
-  ;;                    :request {:clusters [(stack-outputs-get stack "ClusterId")]}}))
-
-  ;; (def cluster (get-in cluster-resp [:clusters 0]))
-
-  ;; (aws/doc ecs :DescribeCapacityProviders )
-
-  ;; (aws/invoke ecs {:op :DescribeCapacityProviders
-  ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
-
-  ;; (aws/invoke ecs {:op :DescribeCapacityProviders
-  ;;                  :request {:capacityProviders (:capacityProviders cluster)}})
-  ;; )
-
-
 (defn service-by-name [context service-name]
   (au/aws-when-let*
    [cluster-name (make-cluster-name context)
