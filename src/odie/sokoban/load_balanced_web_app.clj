@@ -30,22 +30,22 @@
 
 
 (defn setup-ECS-Fargate-infrastructure--req-data [params]
-  (let [{:keys [AppName EnvironmentName]} params]
-    {:StackName (format "%s-%s" AppName EnvironmentName)
+  (let [{:keys [AppName EnvName]} params]
+    {:StackName (make-base-stack-name AppName EnvName)
      :Capabilities ["CAPABILITY_NAMED_IAM"]
      :TemplateBody (slurp (io/resource "cf-templates/ECS-Fargate.yml"))
      :Parameters (au/->params params)
      :Tags (au/->tags {:sokoban-application AppName
-                       :sokoban-environment EnvironmentName})}))
+                       :sokoban-environment EnvName})}))
 
 (defn setup-ECS-EC2-infrastructure--req-data [params]
-  (let [{:keys [AppName EnvironmentName]} params]
-    {:StackName (format "%s-%s" AppName EnvironmentName)
+  (let [{:keys [AppName EnvName]} params]
+    {:StackName (make-base-stack-name AppName EnvName)
      :Capabilities ["CAPABILITY_NAMED_IAM"]
      :TemplateBody (slurp (io/resource "cf-templates/ECS-EC2.yml"))
      :Parameters (au/->params params)
      :Tags (au/->tags {:sokoban-application AppName
-                       :sokoban-environment EnvironmentName})}))
+                       :sokoban-environment EnvName})}))
 
 (defn cf-stack-ensure
   "Create or update the stack to the current state.

@@ -8,7 +8,7 @@ Metadata:
 Parameters:
   AppName:
     Type: String
-  EnvironmentName:
+  EnvName:
     Type: String
   ALBWorkloads:
     Type: String
@@ -85,7 +85,7 @@ Resources:
       InstanceTenancy: default
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}'
 
   PublicRouteTable:
     Metadata:
@@ -95,7 +95,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}'
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
@@ -112,7 +112,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}'
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -130,7 +130,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-pub0'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-pub0'
   PublicSubnet2:
     Metadata:
       'sokoban:description': 'Public subnet 2 for resources that can access the internet'
@@ -142,7 +142,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-pub1'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-pub1'
   PrivateSubnet1:
     Metadata:
       'sokoban:description': 'Private subnet 1 for resources with no internet access'
@@ -154,7 +154,7 @@ Resources:
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-priv0'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-priv0'
   PrivateSubnet2:
     Metadata:
       'sokoban:description': 'Private subnet 2 for resources with no internet access'
@@ -166,7 +166,7 @@ Resources:
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-priv1'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-priv1'
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -194,7 +194,7 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-0'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-0'
   PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Condition: CreateNATGateways
@@ -229,7 +229,7 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-1'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-1'
   PrivateRouteTable2:
     Type: AWS::EC2::RouteTable
     Condition: CreateNATGateways
@@ -291,18 +291,18 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-lb'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-lb'
   # Only accept requests coming from the public ALB or other containers in the same security group.
   EnvironmentSecurityGroup:
     Metadata:
       'sokoban:description': 'A security group to allow your containers to talk to each other'
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvironmentName, EnvironmentSecurityGroup]]
+      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvName, EnvironmentSecurityGroup]]
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-env'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-env'
   EnvironmentSecurityGroupIngressFromPublicALB:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: CreateALB
@@ -396,7 +396,7 @@ Resources:
                 'elasticfilesystem:AccessedViaMountTarget': true
               StringEquals:
                 'iam:ResourceTag/sokoban-application': !Sub '${AppName}'
-                'iam:ResourceTag/sokoban-environment': !Sub '${EnvironmentName}'
+                'iam:ResourceTag/sokoban-environment': !Sub '${EnvName}'
           - Sid: DenyUnencryptedAccess
             Effect: Deny
             Principal: '*'
@@ -414,11 +414,11 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Condition: CreateEFS
     Properties:
-      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvironmentName, EFSSecurityGroup]]
+      GroupDescription: !Join ['', [!Ref AppName, '-', !Ref EnvName, EFSSecurityGroup]]
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub 'sokoban-${AppName}-${EnvironmentName}-efs'
+          Value: !Sub 'sokoban-${AppName}-${EnvName}-efs'
   EFSSecurityGroupIngressFromEnvironment:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: CreateEFS
@@ -559,7 +559,7 @@ Resources:
             Condition:
               StringEquals:
                 'aws:ResourceTag/sokoban-application': !Sub '${AppName}'
-                'aws:ResourceTag/sokoban-environment': !Sub '${EnvironmentName}'
+                'aws:ResourceTag/sokoban-environment': !Sub '${EnvName}'
           - Sid: CloudFormation
             Effect: Allow
             Action: [
@@ -588,7 +588,7 @@ Resources:
             Condition:
               StringEquals:
                 'iam:ResourceTag/sokoban-application': !Sub '${AppName}'
-                'iam:ResourceTag/sokoban-environment': !Sub '${EnvironmentName}'
+                'iam:ResourceTag/sokoban-environment': !Sub '${EnvName}'
           - Sid: ECR
             Effect: Allow
             Action: [
@@ -634,7 +634,7 @@ Resources:
               "ssm:AddTagsToResource"
             ]
             Resource:
-              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/sokoban/${AppName}/${EnvironmentName}/secrets/*'
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/sokoban/${AppName}/${EnvName}/secrets/*'
           - Sid: ELBv2
             Effect: Allow
             Action: [
@@ -804,8 +804,8 @@ Resources:
     Condition: DelegateDNS
     Properties:
       HostedZoneConfig:
-        Comment: !Sub "HostedZone for environment ${EnvironmentName} - ${EnvironmentName}.${AppName}.${AppDNSName}"
-      Name: !Sub ${EnvironmentName}.${AppName}.${AppDNSName}
+        Comment: !Sub "HostedZone for environment ${EnvName} - ${EnvName}.${AppName}.${AppDNSName}"
+      Name: !Sub ${EnvName}.${AppName}.${AppDNSName}
   CertificateValidationFunction:
     Type: AWS::Lambda::Function
     Condition: DelegateDNS
@@ -855,7 +855,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt DNSDelegationFunction.Arn
       DomainName: !Sub ${AppName}.${AppDNSName}
-      SubdomainName: !Sub ${EnvironmentName}.${AppName}.${AppDNSName}
+      SubdomainName: !Sub ${EnvName}.${AppName}.${AppDNSName}
       NameServers: !GetAtt EnvironmentHostedZone.NameServers
       RootDNSRole: !Ref AppDNSDelegationRole
 
@@ -871,7 +871,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt CertificateValidationFunction.Arn
       AppName: !Ref AppName
-      EnvName: !Ref EnvironmentName
+      EnvName: !Ref EnvName
       DomainName: !Ref AppDNSName
       Aliases: !Ref Aliases
       EnvHostedZoneId: !Ref EnvironmentHostedZone
@@ -886,7 +886,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt CustomDomainFunction.Arn
       AppName: !Ref AppName
-      EnvName: !Ref EnvironmentName
+      EnvName: !Ref EnvName
       Aliases: !Ref Aliases
       AppDNSRole: !Ref AppDNSDelegationRole
       DomainName: !Ref AppDNSName
@@ -913,6 +913,10 @@ Outputs:
     Value: !Ref PublicRouteTable
     Export:
       Name: !Sub ${AWS::StackName}-PublicRouteTableID
+  ServiceDiscoveryEndpoint:
+    Value: !Ref ServiceDiscoveryEndpoint
+    Export:
+      Name: !Sub ${AWS::StackName}-ServiceDiscoveryEndpoint
   ServiceDiscoveryNamespaceID:
     Value: !GetAtt ServiceDiscoveryNamespace.Id
     Export:
@@ -973,7 +977,7 @@ Outputs:
       Name: !Sub ${AWS::StackName}-HostedZone
   EnvironmentSubdomain:
     Condition: DelegateDNS
-    Value: !Sub ${EnvironmentName}.${AppName}.${AppDNSName}
+    Value: !Sub ${EnvName}.${AppName}.${AppDNSName}
     Description: The domain name of this environment.
     Export:
       Name: !Sub ${AWS::StackName}-SubDomain
