@@ -940,6 +940,7 @@ Resources:
       IamInstanceProfile: !Ref EcsInstanceProfile
       KeyName: !Ref EcsInstanceKeyPair
       EbsOptimized: true
+      InstanceMonitoring: true
       UserData:
         Fn::Base64: !Ref UserData
       SecurityGroups: [ !Ref EnvironmentSecurityGroup ]
@@ -953,6 +954,7 @@ Resources:
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
       DesiredCapacity: !Ref AsgDesiredCapacity
+      NewInstancesProtectedFromScaleIn: true
 
   CapacityProvider:
     Type: AWS::ECS::CapacityProvider
