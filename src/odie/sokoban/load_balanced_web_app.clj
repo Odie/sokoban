@@ -114,7 +114,7 @@
   (or (resource-created? resource-summary)
       (resource-deleted? resource-summary)
       (str/includes? (:ResourceStatus resource-summary) "COMPLETE")
-      ;; (= (:ResourceStatus resource-summary) "CREATE_FAILED")
+      (str/includes? (:ResourceStatus resource-summary) "FAILED")
       ))
 
 (defn cf-watch-for-stack-completion [cf stackname]
