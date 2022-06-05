@@ -925,6 +925,7 @@ Resources:
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   EcsInstanceProfile:
     Type: AWS::IAM::InstanceProfile
