@@ -1,0 +1,34 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "ec2:DeleteVpc",
+            "Resource": "arn:aws:ec2:*:044973601964:vpc/*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:DeleteInstanceProfile",
+                "servicediscovery:GetOperation",
+                "ec2:DeleteRoute",
+                "servicediscovery:DeleteNamespace",
+                "autoscaling:DescribeLaunchConfigurations",
+                "iam:RemoveRoleFromInstanceProfile",
+                "iam:DeleteRole",
+                "ec2:DetachInternetGateway",
+                "ecs:DescribeCapacityProviders",
+                "iam:DetachRolePolicy",
+                "autoscaling:DescribeScalingActivities",
+                "autoscaling:DeleteLaunchConfiguration",
+                "autoscaling:DescribeAutoScalingGroups",
+                "ec2:DeleteSecurityGroup",
+                "autoscaling:UpdateAutoScalingGroup",
+                "ec2:DeleteInternetGateway",
+                "autoscaling:DeleteAutoScalingGroup",
+                "ec2:DescribeRouteTables"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

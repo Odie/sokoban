@@ -361,7 +361,92 @@
                               :forceNewDeployment true}})
   ))
 
+(defn role-create-cf-role
+  "Create a role used by Sokoban for use when it is deleting CF stacks."
+  []
+  (au/aws-when-let*
+   [iam (au/aws-client :iam)
+    create-reply (aws/invoke iam {:op :CreateRole
+                                  :request {:RoleName "sk-cf-role"
+                                            :Description "Temporary role used while deleting a CF stack"
+                                            :Path "/sokoban/util/"
+                                            :AssumeRolePolicyDocument (slurp (io/resource "cf-assume-role.json"))
+                                            }})
+    put-reply (aws/invoke iam {:op :PutRolePolicy
+                               :request {:PolicyDocument (slurp (io/resource "cf-assume-role-inlines.json"))
+                                         :PolicyName "sk-cf-role-inlines"
+                                         :RoleName "sk-cf-role"
+                                         }
+                               })]
+   [create-reply put-reply]))
+
 (comment
+
+ (au/aws-when-let*
+  [iam (au/aws-client :iam)]
+  (aws/invoke iam {:op :PutRolePolicy :request {:PolicyDocument (slurp (io/resource "cf-assume-role-inlines.json"))
+                                                :PolicyName "sk-cf-role-inlines-11"
+                                                :RoleName "sk-cf-role"
+                                                }
+                   }))
+
+ (slurp (io/resource "cf-assume-role-inlines.json"))
+
+ )
+
+(defn stack-delete-all
+  "Delete all related stacks in one go.
+
+  DANGER!
+  This *will* wipe out all related resources. You will loose all associated data!"
+  [context]
+
+  (au/aws-when-let*
+   [stack-name (base-stack-name @g/app-context)
+    cf (au/aws-client :cloudformation)
+    stacks-reply (aws/invoke cf {:op :DescribeStacks})
+    stacks (:Stacks stacks-reply)
+
+    app-env {:sokoban-application (:app-name @g/app-context)
+             :sokoban-environment (:env-name @g/app-context)}
+
+    target-stacks (->> stacks
+
+                       ;; Look for stacks that have the same app, env pair as the current context
+                       (filter (fn[stack]
+                                 (= (select-keys (au/tags->map (:Tags stack)) [:sokoban-application :sokoban-environment])
+                                    app-env)))
+
+                       ;; Sort items with most app, env, service tuples to the top
+                       ;; We're going to delete the stacks in this order
+                       (sort-by (fn [stack]
+                                  (count (select-keys (au/tags->map (:Tags stack)) [:sokoban-application :sokoban-environment :sokoban-service]))
+                                  ) >))
+    ]
+   (->> target-stacks
+        (reduce (fn [results stack]
+                  (let [stack-name (:StackName stack)
+                        _ (println "Deleting: " stack-name)
+                        delete-reply (aws/invoke cf {:op :DeleteStack
+                                                     :request {:StackName stack-name
+                                                               :RoleARN "arn:aws:iam::044973601964:role/sokoban/util/sk-cf-role"
+
+                                                               }})]
+                    (if (au/aws-error? delete-reply)
+                      (reduced results)
+                      (do
+                        (cf-watch-for-stack-completion cf stack-name)
+
+                        (conj results delete-reply)))))
+                []))))
+
+
+(comment
+  (role-create-cf-role)
+
+  (stack-delete-all @g/app-context)
+
+  (g/set-app-name! "orange")
 
   (service-redeploy-with-latest-image @g/app-context "api")
 
@@ -634,12 +719,14 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   (stack-close-ssh-port stack (my-ip))
 
   ;; Manually change how many ec2 instances we're running
-  (stack-set-capacity-provider-desired-count stack 0)
+  (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 0)
+
 
   (stack-set-capacity-provider-desired-count stack 1)
 
   (fetch-stack "docker")
-  (services-set-desired-count "docker" 0)
+
+  (services-set-desired-count (base-stack-name @g/app-context) 0)
 
   (service-redeploy-with-latest-image @g/app-context "api")
 
@@ -659,4 +746,37 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                     :request {:service target
                               :cluster cluster-name
                               :forceNewDeployment true}}))
+
+
+
+   ;; (def targets target-stacks)
+   ;; (def stacks stacks)
+   ;; (aws/invoke ecs {:op :UpdateService
+   ;;                  :request {:service target
+   ;;                            :cluster cluster-name
+   ;;                            :forceNewDeployment true}})
+
+
+  (->> stacks
+       (filter (fn[stack]
+                 (let [tags (au/tags->map (:Tags stack))]
+                   (= (select-keys tags [:sokoban-application :sokoban-environment])
+                      {:sokoban-application (:app-name @g/app-context)
+                       :sokoban-environment (:env-name @g/app-context)}))))
+       (sort-by (fn [stack]
+                  (count (select-keys (au/tags->map (:Tags stack)) [:sokoban-application :sokoban-environment :sokoban-service]))
+                  ) >)
+       )
+
+  (au/aws-when-let*
+   [iam (au/aws-client :iam)
+    reply (aws/invoke iam {:op :CreateRole
+                           :request {:RoleName "sk-cf-role"
+                                     :Description "Temporary role used while deleting a CF stack"
+                                     :Path "/sokoban/util/"
+                                     :AssumeRolePolicyDocument (slurp (io/resource "cf-assume-role.json"))
+                                     }})
+    ]
+   reply)
+
 )
