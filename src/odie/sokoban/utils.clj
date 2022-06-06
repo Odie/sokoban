@@ -1,8 +1,6 @@
 (ns odie.sokoban.utils
   "General utility functions"
   (:require [clojure.string :as str]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.spec.alpha :as s]
             ))
 

@@ -1,12 +1,9 @@
 (ns odie.sokoban.dev
   "Temporary namespace used for experimentation and putting the program together"
-  (:require [clojure.string :as str]
-            [cognitect.aws.client.api :as aws]
+  (:require [cognitect.aws.client.api :as aws]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [cognitect.aws.credentials :as credentials]
-            [clojure.spec.alpha :as s]
-            [clojure.walk :refer [postwalk]]
             [odie.sokoban.globals :as g]
             [odie.sokoban.utils :as u]
             [odie.sokoban.aws-utils :as au]
@@ -66,7 +63,7 @@
      :Tags (au/->tags {:sokoban-application app-name})}))
 
 
-(defn setup-credential-provider! [context credentials cred-name]
+(defn setup-credential-provider! [credentials cred-name]
   (let [cred (credential-by-name credentials cred-name)]
     (reset! g/credentials-provider (credentials/basic-credentials-provider cred))))
 
@@ -84,7 +81,7 @@
                         (get @g/credentials "default")
                         cred-name)]
     (reset! g/active-credential-name new-cred-name)
-    (setup-credential-provider! g/credentials-provider @g/credentials new-cred-name)))
+    (setup-credential-provider! @g/credentials new-cred-name)))
 
 (defn start-app! []
   ;; Load up app-wide credentials store
@@ -109,7 +106,7 @@
         (swap! g/app-context assoc :account-id (fetch-account-id))
 
         )
-      (throw (ex-info "Cannot fetch account-id"))))
+      (throw (ex-info "Cannot fetch account-id" {}))))
 
   (swap! g/app-context assoc :account-id (get-in @g/credentials [@g/active-credential-name :account-id])))
 
@@ -138,8 +135,7 @@
   ;;
   ;; STS
   ;;
-  (def sts (aws/client {:api :sts
-                        :credentials-provider cred-provider}))
+  (def sts (au/aws-client {:api :sts}))
 
   (def aws-identity
     (aws/invoke sts {:op :GetCallerIdentity}))
@@ -154,8 +150,7 @@
   ;; S3
   ;;
 
-  (def s3 (aws/client {:api :s3
-                       :credentials-provider cred-provider}))
+  (def s3 (au/aws-client {:api :s3}))
 
   (->> (aws/ops s3)
        keys)
@@ -164,21 +159,19 @@
   ;;
   ;; EC2
   ;;
-  (def ec2 (aws/client {:api :ec2
-                        :credentials-provider cred-provider}))
+  (def ec2 (au/aws-client {:api :ec2}))
 
   (->> ec2
        aws/ops
        keys
-       (filter #(key-starts-with? % "Describe"))
+       (filter #(u/key-starts-with? % "Describe"))
        )
 
   ;;---------------------------------------------
   ;;
   ;; ECS
   ;;
-  (def ecs (aws/client {:api :ecs
-                        :credentials-provider cred-provider}))
+  (def ecs (au/aws-client {:api :ecs}))
 
   (->> ecs
        aws/ops
@@ -191,7 +184,7 @@
 
   (aws/doc ecs :DescribeClusters)
 
-  (collect-arn clusters)
+  (au/collect-arn clusters)
 
   (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
 
@@ -205,7 +198,7 @@
 
   (aws/validate-requests cf)
 
-  (->> (aws-ops cf)
+  (->> (au/aws-ops cf)
        sort)
 
   ;; Show the documentation for the CreateStack endpoint
@@ -221,7 +214,7 @@
     {:StackName "sokoban-test-stack"
      :Capabilities ["CAPABILITY_NAMED_IAM"]
      :TemplateBody (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
-     :Parameters (->params {:AdminRoleName (str app-name "-adminrole")
+     :Parameters (au/->params {:AdminRoleName (str app-name "-adminrole")
                             :ExecutionRoleName (str app-name "-executionrole")
                             :DNSDelegationRoleName (str app-name "-DNSDelegationRole")
                             :AppDNSDelegatedAccounts account-id
@@ -229,9 +222,9 @@
                             ;; AppDomainHostedZoneID:
                             :AppName app-name
                             })
-     :Tags (->tags {:sokoban-application "test"})})
+     :Tags (au/->tags {:sokoban-application "test"})})
 
-  (on-spec? (aws/request-spec-key cf :CreateStack)
+  (u/on-spec? (aws/request-spec-key cf :CreateStack)
              req-data)
 
 
@@ -243,7 +236,7 @@
                   :request
                   req-data})
 
-  (on-spec? (aws/request-spec-key cf :CreateStack)
+  (u/on-spec? (aws/request-spec-key cf :CreateStack)
             (setup-roles--req-data @g/app-context)
 
             )

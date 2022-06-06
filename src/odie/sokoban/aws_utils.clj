@@ -2,7 +2,6 @@
   "Utilities that deal specifically with AWS data"
   (:require [clojure.string :as str]
             [clojure.walk :refer [postwalk]]
-            [clojure.spec.alpha :as s]
             [odie.sokoban.utils :as u]
             [odie.sokoban.globals :as g]
             [cognitect.aws.client.api :as aws]

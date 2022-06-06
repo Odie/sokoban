@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [hato.client :as hc]
             [me.raynes.fs :as fs]
+            [clojure.pprint]
             ))
 
 ;; Emulating the way aws copilot works...
@@ -133,10 +134,9 @@
 
                   ;; Keep looping every few seconds until everything has either been
                   ;; created or deleted (in case there is an error).
-                  (if (not (every? #(resource-op-complete? %) data))
-                    (do
-                      (Thread/sleep 5000)
-                      (recur)))))]
+                  (when (not (every? #(resource-op-complete? %) data))
+                    (Thread/sleep 5000)
+                    (recur))))]
 
     (println (format "Waited %.2f seconds" (float (/ (- (System/nanoTime) start-time) 1000000000))))
     result))
@@ -402,13 +402,12 @@
   [context]
 
   (au/aws-when-let*
-   [stack-name (base-stack-name @g/app-context)
-    cf (au/aws-client :cloudformation)
+   [cf (au/aws-client :cloudformation)
     stacks-reply (aws/invoke cf {:op :DescribeStacks})
     stacks (:Stacks stacks-reply)
 
-    app-env {:sokoban-application (:app-name @g/app-context)
-             :sokoban-environment (:env-name @g/app-context)}
+    app-env {:sokoban-application (:app-name context)
+             :sokoban-environment (:env-name context)}
 
     target-stacks (->> stacks
 
@@ -452,10 +451,9 @@
 
 (defn hosted-zone-by-name
   [zone-name]
-  (let [zone-name (let [zone-name "kengoson.com"]
-                    (if (= \. (last zone-name))
-                      zone-name
-                      (str zone-name ".")))]
+  (let [zone-name (if (= \. (last zone-name))
+                    zone-name
+                    (str zone-name "."))]
 
     (->> (hosted-zones)
          (filter #(= zone-name (:Name %))))))
@@ -470,21 +468,13 @@
 
   (service-redeploy-with-latest-image @g/app-context "api")
 
-  (count services)
-
-  (get services 0)
-
   (keypair-by-name "orange-test-instance-key")
   (cluster-instance-key "orange-test")
-
-  (aws/invoke cf {:op :DescribeStacks
-                  :request {:StackName "orange-test"}
-                  })
 
   ;; Setup the dev environment
   (do
     (dev/dev-start-app!)
-    (g/set-app-name! "orange")
+    (g/set-app-name! "banana")
     (g/set-env-name! "test")
 
     (def ec2 (au/aws-client :ec2))
@@ -557,8 +547,9 @@
         (cf-stack-ensure cf req)
         spec?)))
 
-  (if (:StackId create-result)
-    (cf-watch-for-stack-completion cf (:StackId create-result)))
+  (if-not (au/aws-error? create-result)
+    (cf-watch-for-stack-completion cf (:StackId create-result))
+    create-result)
 
   ;; Step 2a: Setup ECS Fargate cluster
   (def create-result
@@ -591,7 +582,7 @@
       ))
 
   ;; Watch and wait for the creation to complete
-  (if (:StackId create-result)
+  (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
@@ -634,7 +625,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
       ))
 
   ;; Watch and wait for the creation to complete
-  (if (:StackId create-result)
+  (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
@@ -670,7 +661,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
       )
     )
 
-  (if (:StackId create-result)
+  (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
@@ -703,7 +694,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
       )
     )
 
-  (if (:StackId create-result)
+  (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 

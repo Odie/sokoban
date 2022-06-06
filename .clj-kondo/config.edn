@@ -1,0 +1,3 @@
+{:lint-as {odie.sokoban.aws-utils/aws-when-let clojure.core/when-let
+           odie.sokoban.aws-utils/aws-when-let* clojure.core/let
+           }}
