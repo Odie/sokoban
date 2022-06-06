@@ -55,14 +55,14 @@
     {:StackName (str app-name "-infrastructure-roles")
      :Capabilities ["CAPABILITY_NAMED_IAM"]
      :TemplateBody (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
-     :Parameters (au/->params {:AdminRoleName (str app-name "-adminrole")
-                            :ExecutionRoleName (str app-name "-executionrole")
-                            :DNSDelegationRoleName (str app-name "-DNSDelegationRole")
-                            :AppDNSDelegatedAccounts account-id
-                            ;; :AppDomainName "kengoson.com"
-                            ;; AppDomainHostedZoneID:
-                            :AppName app-name
-                            })
+     :Parameters (au/->params {:AdminRoleName (str app-name "-AdminRole")
+                               :ExecutionRoleName (str app-name "-ExecutionRole")
+                               :DNSDelegationRoleName (str app-name "-DNSDelegationRole")
+                               :AppDNSDelegatedAccounts account-id
+                               ;; :AppDomainName "kengoson.com"
+                               ;; :AppDomainHostedZoneID:
+                               :AppName app-name
+                               })
      :Tags (au/->tags {:sokoban-application app-name})}))
 
 

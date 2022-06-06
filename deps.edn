@@ -12,6 +12,8 @@
         com.cognitect.aws/lightsail {:mvn/version "822.2.1145.0"}
         com.cognitect.aws/ssm       {:mvn/version "822.2.1145.0"},
         com.cognitect.aws/autoscaling {:mvn/version "822.2.1122.0"}
+        com.cognitect.aws/route53   {:mvn/version "822.2.1109.0"},
+        com.cognitect.aws/route53domains {:mvn/version "822.2.1109.0"},
         hato/hato                   {:mvn/version "0.8.2"}
         clj-commons/fs              {:mvn/version "1.6.310"}
         }

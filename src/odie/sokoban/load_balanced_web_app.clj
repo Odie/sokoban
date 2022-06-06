@@ -441,6 +441,26 @@
                 []))))
 
 
+(defn hosted-zones []
+  (au/aws-when-let*
+   [r53 (au/aws-client :route53)
+    zones-reply (aws/invoke r53 {:op :ListHostedZones
+                                 :request {}})
+    zones (:HostedZones zones-reply)]
+   (->> zones
+        (filter #(= false (get-in % [:Config :PrivateZone]))))))
+
+(defn hosted-zone-by-name
+  [zone-name]
+  (let [zone-name (let [zone-name "kengoson.com"]
+                    (if (= \. (last zone-name))
+                      zone-name
+                      (str zone-name ".")))]
+
+    (->> (hosted-zones)
+         (filter #(= zone-name (:Name %))))))
+
+
 (comment
   (role-create-cf-role)
 
