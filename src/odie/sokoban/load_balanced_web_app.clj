@@ -9,7 +9,20 @@
             [hato.client :as hc]
             [me.raynes.fs :as fs]
             [clojure.pprint]
+            [clj-yaml.core :as yml]
+            [clojure.walk :refer [postwalk]]
+            [odie.sokoban.cfn-yaml :as cy]
+
+            [charred.api :as charred]
+            [clojure.data]
+
+            [odie.sokoban.aws-api :as api]
+            [camel-snake-kebab.core :as csk]
+            [com.rpl.specter :as specter]
             ))
+
+(defn read-json [json-str]
+  (charred/read-json json-str :key-fn keyword))
 
 ;; Emulating the way aws copilot works...
 ;; We setup all the different services as stacks of their own, with related resources
@@ -115,28 +128,57 @@
   (or (resource-created? resource-summary)
       (resource-deleted? resource-summary)
       (str/includes? (:ResourceStatus resource-summary) "COMPLETE")
-      (str/includes? (:ResourceStatus resource-summary) "FAILED")
-      ))
+      (str/includes? (:ResourceStatus resource-summary) "FAILED")))
+
+(defn resource-status-detect-transitions [s1 s2]
+  (let [[before after _] (clojure.data/diff (u/key-by :LogicalResourceId s1)
+                                            (u/key-by :LogicalResourceId s2))]
+    (merge-with vector before after)))
+
+(defn readable-status
+  [s]
+  (au/parse-status-replace :ResourceStatus s))
 
 (defn cf-watch-for-stack-completion [cf stackname]
   (let [start-time (System/nanoTime)
-        result (loop []
+        result (loop [last-data-parsed nil]
                  (au/aws-when-let*
-                  [reply (cf-fetch-stack-status cf stackname)
+                  [continue? (atom true)
+                   reply (cf-fetch-stack-status cf stackname)
                    summaries (:StackResourceSummaries reply)
                    stack (get-in reply [:Stacks 0])
                    data (concat [{:LogicalResourceId (format "%s stack" (:StackName stack))
                                   :ResourceStatus (:StackStatus stack)}]
-                                (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))]
+                                (map #(select-keys % [:LogicalResourceId :ResourceStatus]) summaries))
+                   data-parsed (map readable-status data)
+                   ]
 
                   ;; Print it
                   (clojure.pprint/print-table data)
 
+                  ;; Popup some notifications and ring a bell
+                  (cond
+
+                    (every? #(au/status-finished? (:ResourceStatus %)) data-parsed)
+                    (do
+                      (reset! continue? false)
+                      (u/term-notify {:message "Done!" :title (str "Stack " (:StackName stack)) :sound "default"}))
+                    (not (nil? last-data-parsed))
+                    (u/when-let* [transitions (resource-status-detect-transitions last-data-parsed data-parsed)]
+                                 (when (some #(au/status-transitioned-into-failure-state? (:ResourceStatus (first %)) (:ResourceStatus (second %))) (vals transitions))
+                                   (reset! continue? false)
+                                   (u/term-notify {:message "Something Failed!" :title (str "Stack " stackname) :sound "default"}))))
+
                   ;; Keep looping every few seconds until everything has either been
                   ;; created or deleted (in case there is an error).
-                  (when (not (every? #(resource-op-complete? %) data))
+                  ;; (when (not (every? #(resource-op-complete? %) data))
+                  ;;   (Thread/sleep 5000)
+                  ;;   (recur data-parsed)
+                  ;;   )
+                  (when @continue?
                     (Thread/sleep 5000)
-                    (recur))))]
+                    (recur data-parsed))
+                  ))]
 
     (println (format "Waited %.2f seconds" (float (/ (- (System/nanoTime) start-time) 1000000000))))
     result))
@@ -157,16 +199,101 @@
                        :sokoban-service WorkloadName
                        })}))
 
-(defn setup-service--req-data [params]
-  (let [{:keys [AppName EnvName WorkloadName]} params]
-    {:StackName (format "%s-%s-%s" AppName EnvName WorkloadName)
-     :Capabilities ["CAPABILITY_NAMED_IAM"]
-     :TemplateBody (slurp (io/resource "cf-templates/service.yml"))
-     :Parameters (au/->params params)
-     :Tags (au/->tags {:sokoban-application AppName
-                       :sokoban-environment EnvName
-                       :sokoban-service WorkloadName
-                       })}))
+;; Assuming that a resource is layed out like this:
+;; {:resource-logical-name
+;;  {somedata}
+;; }
+;; Grab and return the resource-logical-name.
+;; This doesn't seem like the best idea, but it's something
+;; that we might be able to work with for now.
+;; It'd probably be clearer to have specific fields where
+;; the resource names are stored.
+;;
+;; When we want to output the data in CFN format, those sokoban
+;; specific fields can be removed with a treewalk.
+(defn res-logical-name [res]
+  (assert (= (count res) 1))
+  (->> res
+       keys
+       first))
+
+;; This makes a single resource that defines a EFS access point.
+(defn res-make-access-point [volume-name rootdir]
+  {(-> (str "AccessPoint-" volume-name)
+       csk/->PascalCase
+       keyword)
+   {:Type "AWS::EFS::AccessPoint"
+    :Properties
+    {:AccessPointTags
+     [
+      {:Key "sokoban-application" :Value (cy/!sub "${AppName}")}
+      {:Key "sokoban-environment" :Value (cy/!sub "${EnvName}")}
+      ]
+     :FileSystemId (cy/!import-value (cy/!sub "${AppName}-${EnvName}-FilesystemID"))
+     :RootDirectory {:Path rootdir
+                     :CreationInfo {:OwnerGid "0"
+                                    :OwnerUid "0"
+                                    :Permissions "0755"}
+                     }}}})
+
+(defn gen-mount-points [mountpt-strs]
+  (let [volumes (for [mountpt-str mountpt-strs]
+                  (let [[volume-name mount-path] (str/split mountpt-str #":")
+                        accesspt (res-make-access-point volume-name
+                                                        (cy/!sub (str "/${WorkloadName}/" volume-name)))]
+
+                    ;; Each volume comes with its own access point
+                    {:accesspt accesspt
+                     :volume
+                     {:Name volume-name
+                      :EFSVolumeConfiguration
+                      {:FilesystemId {"Fn::ImportValue" (cy/!sub "${AppName}-${EnvName}-FilesystemID")}
+
+                       :AuthorizationConfig {:AccessPointId {"Ref" (res-logical-name accesspt)}
+                                             :IAM "ENABLED"}
+                       :TransitEncryption "ENABLED"}}
+                     :mountpt {:SourceVolume volume-name
+                               :ContainerPath mount-path}
+                     }))]
+
+    {:AccessPoints (map :accesspt volumes)
+     :Volumes (map :volume volumes)
+     :MountPoints (map :mountpt volumes)}
+    ))
+
+
+(defn setup-service--req-data
+  ([template-params]
+   (setup-service--req-data template-params {}))
+  ([template-params opts]
+   (let [{:keys [AppName EnvName WorkloadName]} template-params
+         {:keys [mount-strs envs]} opts
+         template (read-json (slurp (io/resource "cf-templates/service.json")))
+
+         ;; Update the template if we have mount points to deal with
+         template (if-not mount-strs
+                    template
+                    (let [mounts (gen-mount-points mount-strs)]
+                      (-> template
+                          (assoc-in [:Resources :TaskDefinition :Properties :ContainerDefinitions 0 :MountPoints] (:MountPoints mounts))
+                          (assoc-in [:Resources :TaskDefinition :Properties :Volumes] (:Volumes mounts))
+                          (update-in [:Resources] u/merge-into (:AccessPoints mounts))
+                          )))
+
+         ;; Inject new environmental vars if provided
+         template (if-not envs
+                    template
+                    (update-in template [:Resources :TaskDefinition :Properties :ContainerDefinitions 0 :Environment] concat (au/->env-vars envs)))
+         ]
+
+     {:StackName (format "%s-%s-%s" AppName EnvName WorkloadName)
+      :Capabilities ["CAPABILITY_NAMED_IAM"]
+      :TemplateBody (charred/write-json-str template :indent-str "  " :escape-slash false)
+      :Parameters (au/->params template-params)
+      :Tags (au/->tags {:sokoban-application AppName
+                        :sokoban-environment EnvName
+                        :sokoban-service WorkloadName
+                        })})))
 
 (defn keypair-by-name
   "Given the name of a keypair, try to locate its secret key in SSM"
@@ -361,6 +488,84 @@
                               :forceNewDeployment true}})
   ))
 
+(defn services-list
+  ([]
+   (services-list @g/app-context))
+  ([context]
+   (au/aws-when-let*
+    [ecs (au/aws-client :ecs)
+     reply (aws/invoke ecs {:op :ListServices
+                            :request {:cluster (make-cluster-name context)}})]
+    (:serviceArns reply))))
+
+(defn services-describe
+  ([]
+   (services-describe @g/app-context nil))
+  ([services]
+   (services-describe @g/app-context services))
+  ([context services]
+   (au/aws-when-let*
+    [service-arns (or services
+                      (services-list context))
+     ecs (au/aws-client :ecs)
+     reply (aws/invoke ecs {:op :DescribeServices
+                            :request {:cluster (make-cluster-name @g/app-context)
+                                      :services service-arns}})]
+    (:services reply))))
+
+(defn tasks-describe [context arns]
+  (au/aws-when-let*
+   [ecs (au/aws-client :ecs)
+    reply (aws/invoke ecs {:op :DescribeTasks
+                            :req {:cluster (make-cluster-name context)
+                                  :tasks arns}})]))
+
+(comment
+  (def services
+    (services-list))
+
+  (->> services
+       last
+       vector
+       services-describe
+       )
+
+  (api/doc :DescribeTaskDefinition)
+
+
+  (api/doc :ListTasks)
+  (api/invoke :ListTasks
+              {:cluster "lime-test"})
+
+  (def ecs (au/aws-client :ecs))
+
+  (api/doc :ListTasks)
+
+  (api/invoke :ListClusters {})
+
+  (aws/invoke ecs {:op :ListTasks
+                   :req {:cluster "lime-test"}})
+
+  (def reply
+    (api/invoke :ListTaskDefinitions
+                {:cluster (make-cluster-name @g/app-context)})
+
+    (->> reply
+         :taskDefinitionArns
+         last))
+
+  ecs
+
+
+  (->> (services-describe nil)
+       first
+       :taskDefinition
+       vector
+       (tasks-describe @g/app-context)
+       )
+
+  )
+
 (defn role-create-cf-role
   "Create a role used by Sokoban for use when it is deleting CF stacks."
   []
@@ -459,7 +664,49 @@
          (filter #(= zone-name (:Name %))))))
 
 
+(defn setup-stack-with-dockerfile [context compose-filepath]
+  (println compose-filepath)
+  (let [dockerfile (yml/parse-string (slurp compose-filepath))]
+    (clojure.pprint/pprint dockerfile)
+
+    )
+
+
+  )
+
+(defn lazy-seq->vec--recursive [coll]
+  (postwalk (fn [x]
+              (if (= (type x) clojure.lang.LazySeq)
+                (into [] x)
+                x))
+            coll))
+
+
+
 (comment
+  ;; (cf-yml/parse* (slurp (io/resource "test.yml")))
+
+  ;; (yaml/parse-string (slurp (io/resource "test.yml"))
+  ;;                    :constructor yaml.reader/passthrough-constructor)
+
+  ;;(gen-mount-points ["pgdata:/var/lib"])
+
+  (keys
+   (read-json (slurp (io/resource "cf-templates/service.json"))))
+
+  (-> (read-json (slurp (io/resource "cf-templates/service.json")))
+       (get-in [:Resources :TaskDefinition :Properties :ContainerDefinitions 0])
+       )
+
+  (gen-mount-points ["pgdata:/var/lib/postgresql/data"])
+
+  (vector (list 1 2 3))
+
+  (yaml/parse-string (slurp (io/resource "TaskDef.template.yml" )))
+
+  (setup-stack-with-dockerfile @g/app-context
+                               (u/expand-home "~/dev/kengoson/backend/compose.yml"))
+
   (role-create-cf-role)
 
   (stack-delete-all @g/app-context)
@@ -474,20 +721,27 @@
   ;; Setup the dev environment
   (do
     (dev/dev-start-app!)
-    (g/set-app-name! "banana")
+    (g/set-app-name! "lime")
     (g/set-env-name! "test")
 
     (def ec2 (au/aws-client :ec2))
     (aws/validate-requests ec2)
 
+    (def ecs (au/aws-client :ecs))
+    (aws/validate-requests ecs)
+
     (def cf (au/aws-client :cloudformation))
     (aws/validate-requests cf)
 
-    (def stack (fetch-stack "orange-test"))
-
     (def as (au/aws-client :autoscaling))
 
+
+    (api/use-api! :ecs)
+    (api/use-api! :ec2)
+    (api/use-api! :cloudformation)
     )
+
+  (aws/doc ecs :DescribeTaskDefinition)
 
   (aws/doc cf :ListStackResources)
   (aws/doc cf :DescribeStackResource)
@@ -578,8 +832,7 @@
 
       (if (true? spec?)
         (cf-stack-ensure cf req)
-        spec?)
-      ))
+        spec?)))
 
   ;; Watch and wait for the creation to complete
   (if-not (au/aws-error? create-result)
@@ -594,10 +847,8 @@
           params {:AppName app-name
                   :EnvName environment
                   :ALBWorkloads "api"
-                  ;; EFSWorkloads:
-                  ;; Type: String
-                  ;; NATWorkloads:
-                  ;; Type: String
+                  :EFSWorkloads "db"
+                  :NATWorkloads "db"
                   :ToolsAccountPrincipalARN (str "arn:aws:iam::" account-id ":root")
                   ;; AppDNSName:
                   ;; Type: String
@@ -621,15 +872,13 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
       (if (true? spec?)
         (cf-stack-ensure cf req)
-        spec?)
-      ))
+        spec?)))
 
   ;; Watch and wait for the creation to complete
   (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
-  (def create-result nil)
 
   ;; Step 3: Setup load-balanced web service
   (def create-result
@@ -642,6 +891,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                   :WorkloadName service-name
                   :ContainerImage "044973601964.dkr.ecr.us-west-1.amazonaws.com/kengoson-backend"
                   ;; "044973601964.dkr.ecr.us-west-1.amazonaws.com/demo/api:cee7709"
+
                   :ContainerPort "8000"
                   :TaskCPU "256"
                   :TaskMemory "512"
@@ -665,7 +915,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
-  ;; Step 4: Setup internal services
+  ;; Step 4: Setup Redis
   (def create-result
     (let [environment (:env-name @g/app-context)
           app-name (:app-name @g/app-context)
@@ -684,15 +934,95 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                   ;; :TargetPort "5000"
                   :LaunchType "EC2"
                   }
-          req (setup-service--req-data params)
+          req (setup-service--req-data params {})
           spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
 
       ;; spec?
       (if (true? spec?)
         (cf-stack-ensure cf req)
+        spec?)))
+
+  (if-not (au/aws-error? create-result)
+    (cf-watch-for-stack-completion cf (:StackId create-result))
+    create-result)
+
+  ;; Step 5: Setup internal services
+  (def create-result
+    (let [environment (:env-name @g/app-context)
+          app-name (:app-name @g/app-context)
+          account-id (:account-id @g/app-context)
+          service-name "db"
+          params {:AppName app-name
+                  :EnvName environment
+                  :WorkloadName service-name
+                  ;; :ContainerImage "postgres:14.3-alpine"
+                  ;; :ContainerPort "5432"
+                  ;; :ContainerImage "redis:7-alpine"
+                  :ContainerImage "redis:latest"
+                  :ContainerPort "6379"
+                  :TaskCPU "256"
+                  :TaskMemory "512"
+                  :TaskCount "1"
+                  :LogRetention "30"
+                  ;; :TargetContainer service-name
+                  ;; :TargetPort "5000"
+                  :LaunchType "EC2"
+                  }
+          req (setup-service--req-data params {:mount-strs ["pgdata:/var/lib/postgresql/data/"]
+                                               :envs {"POSTGRES_USER" "postgres"
+                                                      "POSTGRES_PASSWORD" "postgres"}})
+          ;; req (assoc req :DisableRollback true)
+          ;; req (setup-service--req-data params)
+          spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)
+          ]
+
+      ;; spec?
+      ;; (println(:TemplateBody req))
+      (if (true? spec?)
+        (cf-stack-ensure cf req)
         spec?)
-      )
-    )
+      ))
+
+  (if-not (au/aws-error? create-result)
+    (cf-watch-for-stack-completion cf (:StackId create-result))
+    create-result)
+
+  ;; Step test
+
+  (def create-result
+    (let [environment (:env-name @g/app-context)
+          app-name (:app-name @g/app-context)
+          account-id (:account-id @g/app-context)
+          service-name "tester"
+          params {:AppName app-name
+                  :EnvName environment
+                  :WorkloadName service-name
+                  ;; :ContainerImage "postgres:14.3-alpine"
+                  ;; :ContainerPort "5432"
+                  :ContainerImage "redis:latest"
+                  :ContainerPort "6379"
+                  :TaskCPU "256"
+                  :TaskMemory "512"
+                  :TaskCount "1"
+                  :LogRetention "30"
+                  ;; :TargetContainer service-name
+                  ;; :TargetPort "5000"
+                  :LaunchType "EC2"
+                  }
+          req (setup-service--req-data params {:mount-strs ["pgdata:/var/lib/postgresql/data/"]
+                                               :envs {"POSTGRES_USER" "postgres"
+                                                      "POSTGRES_PASSWORD" "postgres"}})
+          req (assoc req :DisableRollback true)
+          ;; req (setup-service--req-data params)
+          spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)
+          ]
+
+      ;; spec?
+      (spit (io/file "temp.json") (:TemplateBody req))
+      (if (true? spec?)
+        (cf-stack-ensure cf req)
+        spec?)
+      ))
 
   (if-not (au/aws-error? create-result)
     (cf-watch-for-stack-completion cf (:StackId create-result))
@@ -725,9 +1055,11 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   ;; Turn off all services
   (services-set-desired-count (base-stack-name) 0)
 
-  (stack-open-ssh-port stack (my-ip) "SSH for Jonathan")
+  (stack-open-ssh-port (fetch-stack (base-stack-name))
+                       (my-ip) "SSH for Jonathan")
 
-  (stack-close-ssh-port stack (my-ip))
+  (stack-close-ssh-port (fetch-stack (base-stack-name))
+                        (my-ip))
 
   ;; Manually change how many ec2 instances we're running
   (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 0)
@@ -759,18 +1091,9 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                               :forceNewDeployment true}}))
 
 
-
-   ;; (def targets target-stacks)
-   ;; (def stacks stacks)
-   ;; (aws/invoke ecs {:op :UpdateService
-   ;;                  :request {:service target
-   ;;                            :cluster cluster-name
-   ;;                            :forceNewDeployment true}})
-
-
   (->> stacks
        (filter (fn[stack]
-                 (let [tags (au/tags->map (:Tags stack))]
+                 (let [ags (au/tags->map (:Tags stack))]
                    (= (select-keys tags [:sokoban-application :sokoban-environment])
                       {:sokoban-application (:app-name @g/app-context)
                        :sokoban-environment (:env-name @g/app-context)}))))
@@ -789,5 +1112,24 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                                      }})
     ]
    reply)
+
+
+
+  ;; Try to shutdown a stack
+  (services-set-desired-count (base-stack-name @g/app-context) 0)
+
+  (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 0)
+
+  (def ecs (au/aws-client :ecs))
+
+  (aws/doc ecs :DescribeServices)
+
+  (aws/invoke ecs {:op :ListServices
+                   :request {:cluster (make-cluster-name @g/app-context)}})
+
+  (aws/invoke ecs {:op :DescribeServices
+                   :request {:cluster (make-cluster-name @g/app-context)}})
+
+  (aws/doc ecs :DescribeServices)
 
 )

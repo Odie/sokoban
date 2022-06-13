@@ -1,0 +1,63 @@
+Taskdefinition:
+  Metadata:
+    'sokoban:description': 'An ECS task definition to group your containers and run them on ECS'
+  Type: AWS::ECS::TaskDefinition
+  DependsOn: LogGroup
+  Properties:
+    Family:
+      Fn::Join: ['', [Ref: AppName, '-', Ref: EnvName, '-', Ref: WorkloadName]]
+    NetworkMode: awsvpc
+    Cpu:
+      Ref: TaskCPU
+    Memory:
+      Ref: TaskMemory
+    ExecutionRoleArn:
+      Fn::GetAtt: ExecutionRole.Arn
+    TaskRoleArn:
+      Fn::GetAtt: TaskRole.Arn
+    ContainerDefinitions:
+      - Name:
+          Ref: WorkloadName
+        Image:
+          Ref: ContainerImage
+        Environment:
+          - Name: SOKOBAN_APPLICATION_NAME
+            Value:
+              Fn::Sub: '${AppName}'
+          - Name: SOKOBAN_SERVICE_DISCOVERY_ENDPOINT
+            Value:
+              Fn::ImportValue:
+                Fn::Sub: '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'
+          - Name: SOKOBAN_ENVIRONMENT_NAME
+            Value:
+              Fn::Sub: '${EnvName}'
+          - Name: SOKOBAN_SERVICE_NAME
+            Value:
+              Fn::Sub: '${WorkloadName}'
+          - Name: SOKOBAN_LB_DNS
+            Value:
+              Fn::GetAtt:
+                EnvControllerAction.PublicLoadBalancerDNSName
+        EnvironmentFiles:
+          - Fn::If:
+            - HasEnvFile
+            - Type: s3
+              Value:
+                Ref: EnvFileARN
+            - Ref: AWS::NoValue
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-region:
+              Ref: AWS::Region
+            awslogs-group:
+              Ref: LogGroup
+            awslogs-stream-prefix: sokoban
+        PortMappings:
+          - ContainerPort:
+              Ref: ContainerPort
+        Environment:
+          - Name: "SEARCH_DOMAIN"
+            Value:
+              Fn::ImportValue:
+                Fn::Sub: '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'

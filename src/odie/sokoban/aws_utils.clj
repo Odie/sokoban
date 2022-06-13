@@ -5,6 +5,7 @@
             [odie.sokoban.utils :as u]
             [odie.sokoban.globals :as g]
             [cognitect.aws.client.api :as aws]
+            [cognitect.aws.service :as aws-service]
             ))
 
 
@@ -56,22 +57,13 @@
   (aws/client {:api api-kw
                :credentials-provider @g/credentials-provider}))
 
-;; Ripped from clojure src
-(defmacro ^{:private true} assert-args
-  [& pairs]
-  `(do (when-not ~(first pairs)
-         (throw (IllegalArgumentException.
-                 (str (first ~'&form) " requires " ~(second pairs) " in " ~'*ns* ":" (:line (meta ~'&form))))))
-       ~(let [more (nnext pairs)]
-          (when more
-            (list* `assert-args more)))))
 
 (defmacro aws-when-let
   "Like when-let, but only continues with body if the aws/invoke call in the
   bindings succeeds. Otherwise, return the error."
   {:added "1.0"}
   [bindings & body]
-  (assert-args
+  (u/assert-args
    (vector? bindings) "a vector for its binding"
    (= 2 (count bindings)) "exactly 2 forms in binding vector")
   (let [form (bindings 0)
@@ -86,7 +78,7 @@
   "bindings => binding-form test
   When test is true, evaluates body with binding-form bound to the value of test"
   [bindings & body]
-  (assert-args
+  (u/assert-args
    (vector? bindings) "a vector for its binding"
    (< 1 (count bindings)) "at least 2 forms in binding vector"
    (= 0 (mod (count bindings) 2)) "even number of forms in binding vector")
@@ -144,3 +136,71 @@
   (->> tags
        (map #(vector (keyword (or (:key %) (:Key %))) (or (:value %) (:Value %))))
        (into {})))
+
+(defn env-var [var-name var-val]
+  {:Name var-name
+   :Value var-val})
+
+(defn ->env-vars
+  "Given a map of var-name=>var-val, shape it to be accepted as tags in AWS API calls"
+  [vars-map]
+  (map (fn [[k v]] (env-var k v) ) vars-map))
+
+
+;; As per AWS documentation
+;; A resource status can be any of the following states
+;;
+;; Create in progress – The resource is in the process of being created in AWS.
+;;
+;; Create complete – The resource has been successfully created in AWS.
+;;
+;; Create failed – The resource could not be created in AWS.
+;;
+;; Update in progress – The resource is in the process of being updated in AWS.
+;;
+;; Update complete – The resource was successfully updated in AWS.
+;;
+;; Update failed – The resource could not be updated in AWS.
+;;
+;; Delete in progress – The resource is in the process of being deleted in AWS.
+;;
+;; Delete complete – The resource has been deleted in AWS.
+;;
+;; Rollback in progress – An operation has failed and AWS CloudFormation is attempting to restore the resource to its previous state.
+;;
+;; Rollback failed – A rollback has failed. The AWS resources in a CloudFormation stack that have this status are in an inconsistent state. You may have to delete and recreate the stack.
+(defn parse-status
+  "Split a resource status string into `:action` and `:status` parts.
+  Hopefully, this makes it slightly easier to reason about."
+  [s]
+  (let [parts (str/split s #"_")]
+    {:action (keyword (str/lower-case (first parts)))
+     :state (keyword (str/lower-case (str/join "-" (rest parts))))}))
+
+(defn parse-status-replace
+  [key-name m]
+  (assoc m key-name
+         (parse-status (key-name m))))
+
+(defn status-finished?
+  "Does the status represent something that has reached a stable condition?
+  If AWS reports something is `:complete` or `:failed`, we take this to mean
+  no more actions will be performed.
+
+  Note that it's possible for a resource move into the `:rollback` action
+  if either `:create` or `:update` fails. We are not able to detect such a
+  distinction here, however."
+  [status]
+  (let [state (:state status)]
+    (if (or (= state :complete)
+            (= state :failed))
+      true
+      false)))
+
+
+(defn status-transitioned-into-failure-state?
+  [s1 s2]
+  (if (and (= (:state s1) :in-progress)
+           (= (:state s2) :failed))
+    true
+    false))

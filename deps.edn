@@ -16,6 +16,11 @@
         com.cognitect.aws/route53domains {:mvn/version "822.2.1109.0"},
         hato/hato                   {:mvn/version "0.8.2"}
         clj-commons/fs              {:mvn/version "1.6.310"}
+        clj-commons/clj-yaml        {:mvn/version "0.7.108"}
+        ;; portkey-cloud/cfn-yaml      {:mvn/version "0.1.1"}
+        ;; io.forward/yaml             {:mvn/version "1.0.11"}
+        com.cnuernber/charred       {:mvn/version "1.008"}
+        camel-snake-kebab/camel-snake-kebab {:mvn/version "0.4.3"}
         }
  :aliases
  {:run-m {:main-opts ["-m" "odie.sokoban"]}

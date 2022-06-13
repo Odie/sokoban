@@ -1,0 +1,701 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation template that represents a backend service on Amazon ECS.",
+  "Parameters": {
+    "AppName": {
+      "Type": "String"
+    },
+    "EnvName": {
+      "Type": "String"
+    },
+    "WorkloadName": {
+      "Type": "String"
+    },
+    "ContainerImage": {
+      "Type": "String"
+    },
+    "ContainerPort": {
+      "Type": "Number",
+      "Default": -1
+    },
+    "TaskCPU": {
+      "Type": "String"
+    },
+    "TaskMemory": {
+      "Type": "String"
+    },
+    "TaskCount": {
+      "Type": "Number"
+    },
+    "LogRetention": {
+      "Type": "Number"
+    },
+    "AddonsTemplateURL": {
+      "Description": "URL of the addons nested stack template within the S3 bucket.",
+      "Type": "String",
+      "Default": ""
+    },
+    "EnvFileARN": {
+      "Description": "URL of the environment file.",
+      "Type": "String",
+      "Default": ""
+    },
+    "LaunchType": {
+      "Type": "String"
+    },
+    "SubnetType": {
+      "Description": "Determines if the service will be placed on the `Private` or `Public` subnets",
+      "Type": "String",
+      "Default": "Private"
+    }
+  },
+  "Conditions": {
+    "HasAddons": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "AddonsTemplateURL"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "HasEnvFile": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "EnvFileARN"
+            },
+            ""
+          ]
+        }
+      ]
+    },
+    "IsEC2": {
+      "Fn::Equals": [
+        {
+          "Ref": "LaunchType"
+        },
+        "EC2"
+      ]
+    },
+    "ExposePort": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "ContainerPort"
+            },
+            -1
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "LogGroup": {
+      "Metadata": {
+        "sokoban:description": "A CloudWatch log group to hold your service logs"
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/sokoban/",
+              {
+                "Ref": "AppName"
+              },
+              "-",
+              {
+                "Ref": "EnvName"
+              },
+              "-",
+              {
+                "Ref": "WorkloadName"
+              }
+            ]
+          ]
+        },
+        "RetentionInDays": {
+          "Ref": "LogRetention"
+        }
+      }
+    },
+    "TaskDefinition": {
+      "Metadata": {
+        "sokoban:description": "An ECS task definition to group your containers and run them on ECS"
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "Family": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "AppName"
+              },
+              "-",
+              {
+                "Ref": "EnvName"
+              },
+              "-",
+              {
+                "Ref": "WorkloadName"
+              }
+            ]
+          ]
+        },
+        "NetworkMode": "awsvpc",
+        "Cpu": {
+          "Ref": "TaskCPU"
+        },
+        "Memory": {
+          "Ref": "TaskMemory"
+        },
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "ExecutionRole",
+            "Arn"
+          ]
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole",
+            "Arn"
+          ]
+        },
+        "ContainerDefinitions": [
+          {
+            "Name": {
+              "Ref": "WorkloadName"
+            },
+            "Image": {
+              "Ref": "ContainerImage"
+            },
+            "Environment": [
+              {
+                "Name": "SOKOBAN_APPLICATION_NAME",
+                "Value": {
+                  "Fn::Sub": "${AppName}"
+                }
+              },
+              {
+                "Name": "SOKOBAN_SERVICE_DISCOVERY_ENDPOINT",
+                "Value": {
+                  "Fn::ImportValue": {
+                    "Fn::Sub": "${AppName}-${EnvName}-ServiceDiscoveryNamespaceID"
+                  }
+                }
+              },
+              {
+                "Name": "SOKOBAN_ENVIRONMENT_NAME",
+                "Value": {
+                  "Fn::Sub": "${EnvName}"
+                }
+              },
+              {
+                "Name": "SOKOBAN_SERVICE_NAME",
+                "Value": {
+                  "Fn::Sub": "${WorkloadName}"
+                }
+              },
+              {
+                "Name": "SEARCH_DOMAIN",
+                "Value": {
+                  "Fn::ImportValue": {
+                    "Fn::Sub": "${AppName}-${EnvName}-ServiceDiscoveryEndpoint"
+                  }
+                }
+              }
+            ],
+            "EnvironmentFiles": [
+              {
+                "Fn::If": [
+                  "HasEnvFile",
+                  {
+                    "Type": "s3",
+                    "Value": {
+                      "Ref": "EnvFileARN"
+                    }
+                  },
+                  {
+                    "Ref": "AWS::NoValue"
+                  }
+                ]
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-group": {
+                  "Ref": "LogGroup"
+                },
+                "awslogs-stream-prefix": "sokoban"
+              }
+            },
+            "PortMappings": {
+              "Fn::If": [
+                "ExposePort",
+                [
+                  {
+                    "ContainerPort": {
+                      "Ref": "ContainerPort"
+                    }
+                  }
+                ],
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ExecutionRole": {
+      "Metadata": {
+        "sokoban:description": "An IAM Role for the ECS container agent to make AWS API calls on your behalf"
+      },
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AppName"
+                  },
+                  "-",
+                  {
+                    "Ref": "EnvName"
+                  },
+                  "-",
+                  {
+                    "Ref": "WorkloadName"
+                  },
+                  "SecretsPolicy"
+                ]
+              ]
+            },
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:GetParameters"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "ssm:ResourceTag/sokoban-application": {
+                        "Fn::Sub": "${AppName}"
+                      },
+                      "ssm:ResourceTag/sokoban-environment": {
+                        "Fn::Sub": "${EnvName}"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "secretsmanager:ResourceTag/sokoban-application": {
+                        "Fn::Sub": "${AppName}"
+                      },
+                      "secretsmanager:ResourceTag/sokoban-environment": {
+                        "Fn::Sub": "${EnvName}"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:Decrypt"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "Fn::If": [
+              "HasEnvFile",
+              {
+                "PolicyName": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Ref": "AppName"
+                      },
+                      "-",
+                      {
+                        "Ref": "EnvName"
+                      },
+                      "-",
+                      {
+                        "Ref": "WorkloadName"
+                      },
+                      "GetEnvFilePolicy"
+                    ]
+                  ]
+                },
+                "PolicyDocument": {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Action": [
+                        "s3:GetObject"
+                      ],
+                      "Resource": [
+                        {
+                          "Ref": "EnvFileARN"
+                        }
+                      ]
+                    },
+                    {
+                      "Effect": "Allow",
+                      "Action": [
+                        "s3:GetBucketLocation"
+                      ],
+                      "Resource": [
+                        {
+                          "Fn::Join": [
+                            "",
+                            [
+                              "arn:",
+                              {
+                                "Ref": "AWS::Partition"
+                              },
+                              ":s3:::",
+                              {
+                                "Fn::Select": [
+                                  0,
+                                  {
+                                    "Fn::Split": [
+                                      "/",
+                                      {
+                                        "Fn::Select": [
+                                          5,
+                                          {
+                                            "Fn::Split": [
+                                              ":",
+                                              {
+                                                "Ref": "EnvFileARN"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "Ref": "AWS::NoValue"
+              }
+            ]
+          }
+        ],
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+          }
+        ]
+      }
+    },
+    "TaskRole": {
+      "Metadata": {
+        "sokoban:description": "An IAM role to control permissions for the containers in your tasks"
+      },
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "DenyIAMExceptTaggedRoles",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Deny",
+                  "Action": "iam:*",
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sts:AssumeRole",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:ResourceTag/sokoban-application": {
+                        "Fn::Sub": "${AppName}"
+                      },
+                      "iam:ResourceTag/sokoban-environment": {
+                        "Fn::Sub": "${EnvName}"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "ExecuteCommand",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssmmessages:CreateControlChannel",
+                    "ssmmessages:OpenControlChannel",
+                    "ssmmessages:CreateDataChannel",
+                    "ssmmessages:OpenDataChannel"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:DescribeLogGroups",
+                    "logs:DescribeLogStreams",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "DiscoveryService": {
+      "Metadata": {
+        "sokoban:description": "Service discovery for your services to communicate within the VPC"
+      },
+      "Type": "AWS::ServiceDiscovery::Service",
+      "Properties": {
+        "Description": "Discovery Service for the Sokoban services",
+        "DnsConfig": {
+          "RoutingPolicy": "MULTIVALUE",
+          "DnsRecords": [
+            {
+              "TTL": 10,
+              "Type": "A"
+            },
+            {
+              "TTL": 10,
+              "Type": "SRV"
+            }
+          ]
+        },
+        "HealthCheckCustomConfig": {
+          "FailureThreshold": 1
+        },
+        "Name": {
+          "Ref": "WorkloadName"
+        },
+        "NamespaceId": {
+          "Fn::ImportValue": {
+            "Fn::Sub": "${AppName}-${EnvName}-ServiceDiscoveryNamespaceID"
+          }
+        }
+      }
+    },
+    "Service": {
+      "Metadata": {
+        "sokoban:description": "An ECS service to run and maintain your tasks in the environment cluster"
+      },
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "PlatformVersion": {
+          "Fn::If": [
+            "IsEC2",
+            {
+              "Ref": "AWS::NoValue"
+            },
+            "LATEST"
+          ]
+        },
+        "Cluster": {
+          "Fn::ImportValue": {
+            "Fn::Sub": "${AppName}-${EnvName}-ClusterId"
+          }
+        },
+        "TaskDefinition": {
+          "Ref": "TaskDefinition"
+        },
+        "DesiredCount": {
+          "Ref": "TaskCount"
+        },
+        "DeploymentConfiguration": {
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true
+          },
+          "MinimumHealthyPercent": 100,
+          "MaximumPercent": 200
+        },
+        "PropagateTags": "SERVICE",
+        "EnableExecuteCommand": true,
+        "LaunchType": {
+          "Ref": "LaunchType"
+        },
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": {
+              "Fn::If": [
+                "IsEC2",
+                "DISABLED",
+                "ENABLED"
+              ]
+            },
+            "Subnets": {
+              "Fn::Split": [
+                ",",
+                {
+                  "Fn::ImportValue": {
+                    "Fn::Sub": "${AppName}-${EnvName}-${SubnetType}Subnets"
+                  }
+                }
+              ]
+            },
+            "SecurityGroups": [
+              {
+                "Fn::ImportValue": {
+                  "Fn::Sub": "${AppName}-${EnvName}-EnvironmentSecurityGroup"
+                }
+              }
+            ]
+          }
+        },
+        "ServiceRegistries": {
+          "Fn::If": [
+            "ExposePort",
+            [
+              {
+                "RegistryArn": {
+                  "Fn::GetAtt": [
+                    "DiscoveryService",
+                    "Arn"
+                  ]
+                },
+                "Port": {
+                  "Ref": "ContainerPort"
+                }
+              }
+            ],
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        }
+      }
+    },
+    "AddonsStack": {
+      "Metadata": {
+        "sokoban:description": "An Addons CloudFormation Stack for your additional AWS resources"
+      },
+      "Type": "AWS::CloudFormation::Stack",
+      "Condition": "HasAddons",
+      "Properties": {
+        "Parameters": {
+          "App": {
+            "Ref": "AppName"
+          },
+          "Env": {
+            "Ref": "EnvName"
+          },
+          "Name": {
+            "Ref": "WorkloadName"
+          }
+        },
+        "TemplateURL": {
+          "Ref": "AddonsTemplateURL"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "DiscoveryServiceARN": {
+      "Description": "ARN of the Discovery Service.",
+      "Value": {
+        "Fn::GetAtt": [
+          "DiscoveryService",
+          "Arn"
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-${WorkloadName}-DiscoveryServiceARN"
+        }
+      }
+    }
+  }
+}
