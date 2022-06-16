@@ -94,6 +94,9 @@ Resources: # If a bucket URL is specified, that means the template exists.
               Value: !Sub '${WorkloadName}'
             - Name: SOKOBAN_LB_DNS
               Value: !GetAtt EnvControllerAction.PublicLoadBalancerDNSName
+            - Name: "SEARCH_DOMAIN"
+              Value:
+                Fn::ImportValue: !Sub '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'
           EnvironmentFiles:
             - !If
               - HasEnvFile
@@ -108,10 +111,6 @@ Resources: # If a bucket URL is specified, that means the template exists.
               awslogs-stream-prefix: sokoban
           PortMappings:
             - ContainerPort: !Ref ContainerPort
-          Environment:
-            - Name: "SEARCH_DOMAIN"
-              Value:
-                Fn::ImportValue: !Sub '${AppName}-${EnvName}-ServiceDiscoveryEndpoint'
 
   ExecutionRole:
     Metadata:

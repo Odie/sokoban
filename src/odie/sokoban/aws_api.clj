@@ -68,7 +68,7 @@
    [service (op-service op)
     client (au/aws-client service)]
    (aws/invoke client {:op op
-                       :req req})))
+                       :request req})))
 
 
 (defn doc [op-keyword]

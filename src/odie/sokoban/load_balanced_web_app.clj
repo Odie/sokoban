@@ -18,11 +18,13 @@
 
             [odie.sokoban.aws-api :as api]
             [camel-snake-kebab.core :as csk]
-            [com.rpl.specter :as specter]
             ))
 
 (defn read-json [json-str]
   (charred/read-json json-str :key-fn keyword))
+
+(defn pretty-json-str [data]
+  (charred/write-json-str data :indent-str "  " :escape-slash false))
 
 ;; Emulating the way aws copilot works...
 ;; We setup all the different services as stacks of their own, with related resources
@@ -183,16 +185,24 @@
     (println (format "Waited %.2f seconds" (float (/ (- (System/nanoTime) start-time) 1000000000))))
     result))
 
-(defn setup-load-balanced-web-service--req-data [params]
+(defn setup-load-balanced-web-service--req-data [params opts]
   ;; FIXME!!! The way we gather and destructure the params is a bit
   ;; clumsy at the moment. There are slight variations on how variables
   ;; are named. Ex: EnvironmentName vs EnvName.
   ;; Maybe the generic settings like app name and environment name
   ;; should be passed in separately?
-  (let [{:keys [AppName EnvName WorkloadName]} params]
+  (let [{:keys [AppName EnvName WorkloadName]} params
+        {:keys [envs]} opts
+        template (read-json (slurp (io/resource "cf-templates/load-balanced-web-service.json")))
+
+        ;; Inject new environmental vars if provided
+        template (if-not envs
+                   template
+                   (update-in template [:Resources :TaskDefinition :Properties :ContainerDefinitions 0 :Environment] concat (au/->env-vars envs)))]
+
     {:StackName (format "%s-%s-%s" AppName EnvName WorkloadName)
      :Capabilities ["CAPABILITY_NAMED_IAM"]
-     :TemplateBody (slurp (io/resource "cf-templates/load-balanced-web-service.yml"))
+     :TemplateBody (pretty-json-str template)
      :Parameters (au/->params params)
      :Tags (au/->tags {:sokoban-application AppName
                        :sokoban-environment EnvName
@@ -288,7 +298,7 @@
 
      {:StackName (format "%s-%s-%s" AppName EnvName WorkloadName)
       :Capabilities ["CAPABILITY_NAMED_IAM"]
-      :TemplateBody (charred/write-json-str template :indent-str "  " :escape-slash false)
+      :TemplateBody (pretty-json-str template)
       :Parameters (au/->params template-params)
       :Tags (au/->tags {:sokoban-application AppName
                         :sokoban-environment EnvName
@@ -901,7 +911,11 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
                   :TargetPort "8000"
                   :LaunchType "EC2"
                   }
-          req (setup-load-balanced-web-service--req-data params)
+          req (setup-load-balanced-web-service--req-data params
+                                                         {:envs {"DB_HOST" "db"
+                                                                 "DB_USER" "postgres"
+                                                                 "DB_PASSWORD" "postgres"}
+                                                          })
           spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
 
       ;; spec?
@@ -955,11 +969,8 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
           params {:AppName app-name
                   :EnvName environment
                   :WorkloadName service-name
-                  ;; :ContainerImage "postgres:14.3-alpine"
-                  ;; :ContainerPort "5432"
-                  ;; :ContainerImage "redis:7-alpine"
-                  :ContainerImage "redis:latest"
-                  :ContainerPort "6379"
+                  :ContainerImage "postgres:14.3-alpine"
+                  :ContainerPort "5432"
                   :TaskCPU "256"
                   :TaskMemory "512"
                   :TaskCount "1"
@@ -987,46 +998,6 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
-  ;; Step test
-
-  (def create-result
-    (let [environment (:env-name @g/app-context)
-          app-name (:app-name @g/app-context)
-          account-id (:account-id @g/app-context)
-          service-name "tester"
-          params {:AppName app-name
-                  :EnvName environment
-                  :WorkloadName service-name
-                  ;; :ContainerImage "postgres:14.3-alpine"
-                  ;; :ContainerPort "5432"
-                  :ContainerImage "redis:latest"
-                  :ContainerPort "6379"
-                  :TaskCPU "256"
-                  :TaskMemory "512"
-                  :TaskCount "1"
-                  :LogRetention "30"
-                  ;; :TargetContainer service-name
-                  ;; :TargetPort "5000"
-                  :LaunchType "EC2"
-                  }
-          req (setup-service--req-data params {:mount-strs ["pgdata:/var/lib/postgresql/data/"]
-                                               :envs {"POSTGRES_USER" "postgres"
-                                                      "POSTGRES_PASSWORD" "postgres"}})
-          req (assoc req :DisableRollback true)
-          ;; req (setup-service--req-data params)
-          spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)
-          ]
-
-      ;; spec?
-      (spit (io/file "temp.json") (:TemplateBody req))
-      (if (true? spec?)
-        (cf-stack-ensure cf req)
-        spec?)
-      ))
-
-  (if-not (au/aws-error? create-result)
-    (cf-watch-for-stack-completion cf (:StackId create-result))
-    create-result)
 
   ;;---------------------------------------------------------------------
   ;; Misc actions
@@ -1132,4 +1103,105 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   (aws/doc ecs :DescribeServices)
 
+  ;; Given a service name...
+  ;; Locate a single EC2 instance that is running the task
+
+  (swap! services assoc :api (service-by-name @g/app-context "api"))
+
+  (api/doc :ListTasks)
+
+  (api/invoke :ListTasks {:cluster "lime-test"})
+
+  (api/invoke :ListTasks {:cluster "arn:aws:ecs:us-west-1:044973601964:cluster/lime-test"})
+
+  (aws/invoke (au/aws-client :ecs) {:op :ListTasks
+                                    :request {:cluster "lime-test"}
+                                    })
+
+  (au/aws-when-let*
+   [cluster-name (make-cluster-name @g/app-context)
+    service (service-by-name-fc services @g/app-context "api")
+    task-def-arn (:taskDefinition service)
+
+    ;; Get task def
+    reply (api/invoke :DescribeTaskDefinition {:taskDefinition task-def-arn})
+    task-def (:taskDefinition reply)
+    task-family (:family task-def)
+
+    ;; Get task
+    reply (api/invoke :ListTasks {:cluster cluster-name
+                                  :family task-family })
+    task-arn (get-in reply [:taskArns 0])
+    reply (api/invoke :DescribeTasks {:cluster cluster-name
+                                      :tasks [task-arn]})
+
+    container-inst-arn (get-in reply [:tasks 0 :containerInstanceArn])
+    reply (api/invoke :DescribeContainerInstances {:cluster cluster-name
+                                                   :containerInstances [container-inst-arn]})
+    container-inst (get-in reply [:containerInstances 0])
+    ec2-inst-id (:ec2InstanceId container-inst)
+
+    reply (api/invoke :DescribeInstances {:InstanceIds [ec2-inst-id]})
+    ]
+   (get-in reply [:Reservations 0 :Instances 0 :PublicDnsName]))
+
+  (api/doc :DescribeContainerInstances)
+  (api/doc :DescribeInstances)
+
+
+  (service-by-name-fc services @g/app-context "cache")
+
+  (println
+   (service-ssh-cmd @g/app-context "api"))
+
+  (service-find-ec2-instance-dns-name @g/app-context "api")
+
 )
+
+(def services (atom {}))
+
+(defn service-by-name-fc [cache-atom context service-name]
+  (if (contains? @cache-atom (keyword service-name))
+    (get @cache-atom (keyword service-name))
+
+    (au/aws-when-let*
+     [res (service-by-name context service-name)]
+     (swap! cache-atom assoc (keyword service-name) res)
+     res)))
+
+(defn task-def-remove-version [arn]
+  (subs arn 0 (str/last-index-of arn ":")))
+
+(defn service-find-ec2-instance-dns-name [context service-name]
+  (au/aws-when-let*
+   [cluster-name (make-cluster-name context)
+    service (service-by-name-fc services context service-name)
+    task-def-arn (:taskDefinition service)
+
+    ;; Get task def
+    reply (api/invoke :DescribeTaskDefinition {:taskDefinition task-def-arn})
+    task-def (:taskDefinition reply)
+    task-family (:family task-def)
+
+    ;; Get task
+    reply (api/invoke :ListTasks {:cluster cluster-name
+                                  :family task-family })
+    task-arn (get-in reply [:taskArns 0])
+    reply (api/invoke :DescribeTasks {:cluster cluster-name
+                                      :tasks [task-arn]})
+
+    container-inst-arn (get-in reply [:tasks 0 :containerInstanceArn])
+    reply (api/invoke :DescribeContainerInstances {:cluster cluster-name
+                                                   :containerInstances [container-inst-arn]})
+    container-inst (get-in reply [:containerInstances 0])
+    ec2-inst-id (:ec2InstanceId container-inst)
+
+    reply (api/invoke :DescribeInstances {:InstanceIds [ec2-inst-id]})
+    ]
+   (get-in reply [:Reservations 0 :Instances 0 :PublicDnsName])))
+
+
+(defn service-ssh-cmd [context service-name]
+  (let [cluster-name (make-cluster-name context)
+        dns-name (service-find-ec2-instance-dns-name context service-name)]
+    (format "ssh -i \"~/.ssh/%s-instance-key.pem\" ec2-user@%s" cluster-name dns-name)))
