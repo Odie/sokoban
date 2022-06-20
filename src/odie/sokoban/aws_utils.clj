@@ -116,7 +116,9 @@
   "Given a kv, shape it to be accepted as tags in AWS API calls"
   [key-name value]
   {:Key (name key-name)
-   :Value (name value)})
+   :Value (if (keyword? value)
+            (name value)
+            value)})
 
 (defn ->tags
   "Given a map, shape it to be accepted as tags in AWS API calls"

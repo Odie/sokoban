@@ -235,16 +235,14 @@
    {:Type "AWS::EFS::AccessPoint"
     :Properties
     {:AccessPointTags
-     [
-      {:Key "sokoban-application" :Value (cy/!sub "${AppName}")}
-      {:Key "sokoban-environment" :Value (cy/!sub "${EnvName}")}
-      ]
+     (au/->tags
+      {"sokoban-application" (cy/!sub "${AppName}")
+       "sokoban-environment" (cy/!sub "${EnvName}")})
      :FileSystemId (cy/!import-value (cy/!sub "${AppName}-${EnvName}-FilesystemID"))
      :RootDirectory {:Path rootdir
                      :CreationInfo {:OwnerGid "0"
                                     :OwnerUid "0"
-                                    :Permissions "0755"}
-                     }}}})
+                                    :Permissions "0755"}}}}})
 
 (defn gen-mount-points [mountpt-strs]
   (let [volumes (for [mountpt-str mountpt-strs]
@@ -399,9 +397,9 @@
 
     ;; Add a rule to the security group
     (au/aws-when-let
-     [auth-reply (aws/invoke ec2 {:op :AuthorizeSecurityGroupIngress
-                                  :request {:GroupId sec-group-id
-                                            :IpPermissions [ssh-permission]}})]
+     [_ (aws/invoke ec2 {:op :AuthorizeSecurityGroupIngress
+                         :request {:GroupId sec-group-id
+                                   :IpPermissions [ssh-permission]}})]
 
      ;; Add a description
      (aws/invoke ec2 {:op :UpdateSecurityGroupRuleDescriptionsIngress
@@ -523,58 +521,10 @@
                                       :services service-arns}})]
     (:services reply))))
 
-(defn tasks-describe [context arns]
-  (au/aws-when-let*
-   [ecs (au/aws-client :ecs)
-    reply (aws/invoke ecs {:op :DescribeTasks
-                            :req {:cluster (make-cluster-name context)
-                                  :tasks arns}})]))
-
-(comment
-  (def services
-    (services-list))
-
-  (->> services
-       last
-       vector
-       services-describe
-       )
-
-  (api/doc :DescribeTaskDefinition)
-
-
-  (api/doc :ListTasks)
-  (api/invoke :ListTasks
-              {:cluster "lime-test"})
-
-  (def ecs (au/aws-client :ecs))
-
-  (api/doc :ListTasks)
-
-  (api/invoke :ListClusters {})
-
-  (aws/invoke ecs {:op :ListTasks
-                   :req {:cluster "lime-test"}})
-
-  (def reply
-    (api/invoke :ListTaskDefinitions
-                {:cluster (make-cluster-name @g/app-context)})
-
-    (->> reply
-         :taskDefinitionArns
-         last))
-
-  ecs
-
-
-  (->> (services-describe nil)
-       first
-       :taskDefinition
-       vector
-       (tasks-describe @g/app-context)
-       )
-
-  )
+(defn tasks-describe
+  [context arns]
+  (api/invoke :DescribeTasks {:cluster (make-cluster-name context)
+                              :tasks arns}))
 
 (defn role-create-cf-role
   "Create a role used by Sokoban for use when it is deleting CF stacks."
@@ -680,8 +630,6 @@
     (clojure.pprint/pprint dockerfile)
 
     )
-
-
   )
 
 (defn lazy-seq->vec--recursive [coll]
