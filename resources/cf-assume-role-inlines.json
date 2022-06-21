@@ -9,6 +9,7 @@
         {
             "Effect": "Allow",
             "Action": [
+                "ecs:DescribeClusters",
                 "iam:DeleteInstanceProfile",
                 "servicediscovery:GetOperation",
                 "ec2:DeleteRoute",
@@ -26,7 +27,9 @@
                 "autoscaling:UpdateAutoScalingGroup",
                 "ec2:DeleteInternetGateway",
                 "autoscaling:DeleteAutoScalingGroup",
-                "ec2:DescribeRouteTables"
+                "ec2:DescribeRouteTables",
+                "ec2:DeleteKeyPair",
+                "ec2:DescribeKeyPairs"
             ],
             "Resource": "*"
         }

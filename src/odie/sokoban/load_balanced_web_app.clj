@@ -55,8 +55,8 @@
   {:StackName (str app-name "-infrastructure-roles")
    :Capabilities ["CAPABILITY_NAMED_IAM"]
    :TemplateBody (slurp (io/resource "cf-templates/infrastructure-roles.yml"))
-   :Parameters (au/->params {:AdminRoleName (str app-name "-adminrole")
-                             :ExecutionRoleName (str app-name "-executionrole")
+   :Parameters (au/->params {:AdminRoleName (str app-name "-AdminRole")
+                             :ExecutionRoleName (str app-name "-ExecutionRole")
                              :DNSDelegationRoleName (str app-name "-DNSDelegationRole")
                              :AppDNSDelegatedAccounts account-id
                              ;; :AppDomainName "kengoson.com"
@@ -546,16 +546,14 @@
    [create-reply put-reply]))
 
 (comment
+  ;; Update the sk-cf-role
+  (api/invoke :PutRolePolicy {:PolicyDocument (slurp (io/resource "cf-assume-role-inlines.json"))
+                              :PolicyName "sk-cf-role-inlines"
+                              :RoleName "sk-cf-role"
+                              })
 
- (au/aws-when-let*
-  [iam (au/aws-client :iam)]
-  (aws/invoke iam {:op :PutRolePolicy :request {:PolicyDocument (slurp (io/resource "cf-assume-role-inlines.json"))
-                                                :PolicyName "sk-cf-role-inlines-11"
-                                                :RoleName "sk-cf-role"
-                                                }
-                   }))
-
- (slurp (io/resource "cf-assume-role-inlines.json"))
+  ;; Delete the current stack
+  (stack-delete-all @g/app-context)
 
  )
 
@@ -697,6 +695,7 @@
     (api/use-api! :ecs)
     (api/use-api! :ec2)
     (api/use-api! :cloudformation)
+    (api/use-api! :iam)
     )
 
   (aws/doc ecs :DescribeTaskDefinition)
