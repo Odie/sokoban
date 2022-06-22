@@ -4,7 +4,9 @@
             [clojure.spec.alpha :as s]
             [clojure.java.shell :refer [sh]]
             [clojure.pprint]
-            ))
+            [clojure.java.io :as io])
+  (:import java.io.StringWriter java.lang.ProcessBuilder$Redirect)
+  )
 
 
 (defn key-starts-with?
@@ -128,3 +130,70 @@
            ~(if (seq more)
               `(aws-when-let* ~more ~@body)
               `(do ~@body)))))))
+
+(defn ^"[Ljava.lang.String;" string-array [args]
+  (into-array String args))
+
+(defn exec-stty
+  "Excute the `stty(1)` command to configure TTY options like input echoing, and
+  line handling."
+  [& args]
+  (let [^Process
+        process (-> (ProcessBuilder. (string-array (cons "stty" args)))
+                    (.redirectInput (ProcessBuilder$Redirect/from (io/file "/dev/tty")))
+                    (.start))
+
+        ^StringWriter err (StringWriter.)]
+    {:exit (.waitFor process)
+     :err @(future
+             (with-open [^StringWriter err (StringWriter.)]
+               (io/copy (.getErrorStream process) err)
+               (.toString err)))
+     :out @(future
+             (with-open [^StringWriter out (StringWriter.)]
+               (io/copy (.getInputStream process) out)
+               (.toString out)))}))
+
+(defn raw-terminal-mode [on?]
+  (if on?
+    (exec-stty "-echo" "-icanon")
+    (exec-stty "echo" "icanon")))
+
+(defmacro with-raw-terminal-mode
+  "Turn on raw terminal mode, run the given body, then turn the raw terminal mode off,
+  returning the result of the body."
+  [body]
+  `(do
+     (raw-terminal-mode true)
+     (let [res# ~body]
+       (raw-terminal-mode false)
+       res#)))
+
+(defn x-lines-up--sol
+  "Move up `x` number of lines and move to start of line"
+  [x]
+  (format "\033[%dF" x))
+
+(defn x-lines-down--sol
+  "Move down `x` number of lines and move to start of line"
+  [x]
+  (format "\033[%dE" x))
+
+
+(defn vector-or-seq? [coll]
+  (or (vector? coll)
+      (seq? coll)))
+
+(defmacro doseq-indexed
+  "loops over a set of values, binding index-sym to the 0-based index of each value"
+  ([[val-sym values index-sym] & code]
+   `(loop [vals# (seq ~values)
+           ~index-sym (long 0)]
+      (if vals#
+        (let [~val-sym (first vals#)]
+          ~@code
+          (recur (next vals#) (inc ~index-sym)))
+        nil))))
+
+(defn indexed [a-seq]
+  (map-indexed vector a-seq))

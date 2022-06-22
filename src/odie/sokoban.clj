@@ -1,12 +1,14 @@
 (ns odie.sokoban
+  (:require [babashka.cli :as cli]
+            [odie.sokoban.cli.init :as init])
   (:gen-class))
 
-(defn greet
-  "Callable entry point to the application."
-  [data]
-  (println (str "Hello, " (or (:name data) "World") "!")))
+(def dispatch-table
+  (concat init/dispatch-table))
 
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (greet {:name (first args)}))
+  (cli/dispatch dispatch-table args)
+  (System/exit 0)
+  )
