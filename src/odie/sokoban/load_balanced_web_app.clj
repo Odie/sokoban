@@ -696,7 +696,11 @@
     (api/use-api! :ec2)
     (api/use-api! :cloudformation)
     (api/use-api! :iam)
+    (api/use-api! :sts)
+    (api/use-api! :ecr)
     )
+
+  (api/reset-cache)
 
   (aws/doc ecs :DescribeTaskDefinition)
 

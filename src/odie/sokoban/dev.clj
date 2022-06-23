@@ -17,13 +17,8 @@
        slurp
        edn/read-string))
 
-(defn write-edn
-  "Write the `data` to `target-file` in EDN format"
-  [target-file data]
-  (spit target-file (pr-str data)))
-
 (defn save-credentials [data]
-  (write-edn (credentials-filepath) data))
+  (u/write-edn (credentials-filepath) data))
 
 (defn credential-by-name
   ([creds]

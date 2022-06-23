@@ -7,6 +7,14 @@
 (defonce used-apis (atom #{}))
 (defonce op-to-service-table (atom {}))
 
+(defn reset-atom [a]
+  (reset! a (empty @a)))
+
+(defn reset-cache []
+  (reset-atom used-apis)
+  (reset-atom op-to-service-table)
+  :done)
+
 (defn aws-ops
   "Given the API keyword, such as :ecs or :ec2, return a list of known APIs we can
   call."
@@ -28,9 +36,12 @@
                             (into {}))
           old-lookup @op-to-service-table
           new-lookup (merge old-lookup new-mappings)]
+
       (when-not (= (count new-lookup) (+ (count old-lookup) (count new-mappings)))
-        (throw (ex-info "`aws-use!` encountered duplicate operation names" {:api-to-add api-keyword :used-apis used-apis})))
-      (reset! op-to-service-table new-lookup)
+        (let [[_ _ conflicting-entries] (clojure.data/diff old-lookup new-mappings)]
+          (when-not (empty? conflicting-entries)
+            (throw (ex-info "`aws-use!` encountered duplicate operation names" {:api-to-add api-keyword :used-apis used-apis :conflicts conflicting-entries})))))
+      (reset! op-to-service-table (merge old-lookup new-mappings))
       (swap! used-apis conj api-keyword))))
 
 

@@ -1,7 +1,9 @@
 (ns odie.sokoban.cli
   (:require [odie.sokoban.utils :as u]
-            [colorize.core :refer [green]]))
+            [colorize.core :refer [green blue]]
+            [me.raynes.fs :as fs]))
 
+(defonce ^:dynamic *in-repl* false)
 
 (defn render-choice
   [items selection]
@@ -20,6 +22,16 @@
       :finally (println)))
   (count items))
 
+(defn get-user-input
+  ([]
+   (get-user-input nil))
+  ([prompt]
+
+   (when prompt
+     (println (blue prompt)))
+   (let [input (read-line)]
+     (println)
+     input)))
 
 (defn choice
   "Let the user pick from a list of choices interactively via the keyboard.
@@ -34,7 +46,8 @@
         render (fn []
                  (when-not (zero? @render-cnt)
                    (print (u/x-lines-up--sol (+ (count items) 1))))
-                 (println prompt)
+                 (when prompt
+                   (println prompt))
                  (render-choice items @selection)
                  (.flush System/out)
                  (swap! render-cnt inc))
@@ -70,17 +83,24 @@
     (u/with-raw-terminal-mode
       (loop []
         (let [buf (transient [])]
-          (read-all buf)
+          ;; Grab the user input
+          ;; Depending on if we're working in the repl or not, we want to deal with
+          ;; input retrieval slightly differently
+          (if *in-repl*
+            (conj! buf (get-user-input nil))
+            (read-all buf))
           (let [data (persistent! buf)]
             ;; (println data)
             (cond
               (or
+               (= data ["u"])
                (= data [(int \k)])
                (= data [27 91 65])) ;; \033[A - Up arrow
               (do
                 (swap! selection #(max 0 (dec %)))
                 (render))
               (or
+               (= data ["d"])
                (= data [(int \j)])
                (= data [27 91 66])) ;; \033[B - Down arrow
               (do
@@ -92,8 +112,32 @@
               :no-op)
 
             ;; We're going to keep looping until the user hits the 'enter' key
-            (when (not= data [10])
+            (when (and (not= data [10])
+                       (not= data [""]))
               (recur))))))
+    (println)
 
     ;; Return the selection the user chose
     (nth xs @selection)))
+
+(defn exists?-or-print-error [file prompt]
+  (if-not (fs/exists? file)
+    (do
+      (if (= 1 (u/re-count #"%s" prompt))
+        (println (format prompt file))
+        (println prompt))
+      false)
+    true))
+
+(defn absent?-or-print-error [file prompt]
+  (if (fs/exists? file)
+    ;; The file exists?
+    (do
+      (if (= 1 (u/re-count #"%s" prompt))
+        (println (format prompt file))
+        (println prompt))
+      ;; Answer that it is *not* absent
+      false)
+
+    ;; Yes, the file is absent
+    true))

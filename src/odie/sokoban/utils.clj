@@ -4,7 +4,8 @@
             [clojure.spec.alpha :as s]
             [clojure.java.shell :refer [sh]]
             [clojure.pprint]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.edn :as edn])
   (:import java.io.StringWriter java.lang.ProcessBuilder$Redirect)
   )
 
@@ -197,3 +198,16 @@
 
 (defn indexed [a-seq]
   (map-indexed vector a-seq))
+
+(defn write-edn
+  "Write the `data` to `target-file` in EDN format"
+  [target-file data]
+  (pretty-spit target-file data))
+
+(defn read-edn
+  "Read the target edn file"
+  [target-file]
+  (edn/read-string (slurp target-file)))
+
+(defn re-count [re s]
+  (count (re-seq re s)))
