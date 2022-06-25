@@ -394,14 +394,15 @@ Resources:
             Principal:
               AWS: '*'
             Action:
+              - elasticfilesystem:ClientRootAccess
               - elasticfilesystem:ClientWrite
               - elasticfilesystem:ClientMount
             Condition:
               Bool:
                 'elasticfilesystem:AccessedViaMountTarget': true
               StringEquals:
-                'iam:ResourceTag/sokoban-application': !Sub '${AppName}'
-                'iam:ResourceTag/sokoban-environment': !Sub '${EnvName}'
+                'aws:ResourceTag/sokoban-application': !Sub '${AppName}'
+                'aws:ResourceTag/sokoban-environment': !Sub '${EnvName}'
           - Sid: DenyUnencryptedAccess
             Effect: Deny
             Principal: '*'

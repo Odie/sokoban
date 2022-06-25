@@ -26,6 +26,9 @@
 (defn pretty-json-str [data]
   (charred/write-json-str data :indent-str "  " :escape-slash false))
 
+(defn json-str [data]
+  (charred/write-json-str data :escape-slash false))
+
 ;; Emulating the way aws copilot works...
 ;; We setup all the different services as stacks of their own, with related resources
 ;; that are controlled together.
@@ -240,8 +243,8 @@
        "sokoban-environment" (cy/!sub "${EnvName}")})
      :FileSystemId (cy/!import-value (cy/!sub "${AppName}-${EnvName}-FilesystemID"))
      :RootDirectory {:Path rootdir
-                     :CreationInfo {:OwnerGid "0"
-                                    :OwnerUid "0"
+                     :CreationInfo {:OwnerGid "1000"
+                                    :OwnerUid "1000"
                                     :Permissions "0755"}}}}})
 
 (defn gen-mount-points [mountpt-strs]
@@ -339,6 +342,51 @@
    (keypair-by-name (get-in keypair-res-reply [:StackResourceDetail :PhysicalResourceId]))))
 
 (cluster-instance-key "orange-test")
+
+(defn service-set-desired-count [context service-name desired-count]
+  (au/aws-when-let*
+   [reply (service-by-name context service-name)
+    srv-arn (:serviceArn reply)]
+
+   (api/invoke :UpdateService {:service srv-arn
+                               :cluster (make-cluster-name context)
+                               :desiredCount desired-count})))
+
+(defn wait-for [expected-value f & args]
+  (loop [cur-val (apply f args)]
+    (if (= cur-val expected-value)
+      :done
+      (do
+        (Thread/sleep 1000)
+        (recur (apply f args))))))
+
+(defn service-get-running-count [context service-name]
+  (au/aws-when-let
+   [service (service-by-name context service-name)]
+   (:runningCount service)))
+
+(comment
+  (service-by-name @g/app-context "db")
+
+  ;; Wait for service shutdown
+  (time
+   (do
+     (service-set-desired-count @g/app-context "db" 0)
+     (wait-for 0 service-get-running-count @g/app-context "db")))
+
+  ;; Service restart (shutdown and start)
+  (time
+   (do
+     (service-set-desired-count @g/app-context "db" 0)
+
+     (wait-for 0 service-get-running-count @g/app-context "db")
+
+     (service-set-desired-count @g/app-context "db" 1)
+
+     ))
+
+  )
+
 
 (defn services-set-desired-count [cluster-name desired-count]
   (au/aws-when-let*
@@ -677,7 +725,7 @@
   ;; Setup the dev environment
   (do
     (dev/dev-start-app!)
-    (g/set-app-name! "lime")
+    (g/set-app-name! "kengo")
     (g/set-env-name! "test")
 
     (def ec2 (au/aws-client :ec2))
@@ -826,7 +874,10 @@
                   :UserData (format"#!/bin/bash
 echo ECS_CLUSTER=\"%s\" >> /etc/ecs/ecs.config;
 echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
-" (format "%s-%s"app-name environment))
+echo ECS_CONTAINER_INSTANCE_TAGS=%s"
+                                   (format "%s-%s" app-name environment)
+                                   (json-str {:sokoban-application app-name
+                                              :sokoban-environment environment}))
                   }
           req (setup-ECS-EC2-infrastructure--req-data params)
           spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
@@ -1042,6 +1093,14 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
 
   (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 0)
 
+  (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 1)
+
+  (stack-set-capacity-provider-desired-count (fetch-stack (base-stack-name @g/app-context)) 2)
+
+  (services-set-desired-count (base-stack-name @g/app-context) 1)
+
+  (services-set-desired-count (base-stack-name @g/app-context) 1)
+
   (def ecs (au/aws-client :ecs))
 
   (aws/doc ecs :DescribeServices)
@@ -1103,7 +1162,7 @@ echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config;
   (service-by-name-fc services @g/app-context "cache")
 
   (println
-   (service-ssh-cmd @g/app-context "api"))
+   (service-ssh-cmd @g/app-context "db"))
 
   (service-find-ec2-instance-dns-name @g/app-context "api")
 

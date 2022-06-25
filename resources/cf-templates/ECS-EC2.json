@@ -757,6 +757,7 @@
                 "AWS": "*"
               },
               "Action": [
+                "elasticfilesystem:ClientRootAccess",
                 "elasticfilesystem:ClientWrite",
                 "elasticfilesystem:ClientMount"
               ],
@@ -765,10 +766,10 @@
                   "elasticfilesystem:AccessedViaMountTarget": true
                 },
                 "StringEquals": {
-                  "iam:ResourceTag/sokoban-application": {
+                  "aws:ResourceTag/sokoban-application": {
                     "Fn::Sub": "${AppName}"
                   },
-                  "iam:ResourceTag/sokoban-environment": {
+                  "aws:ResourceTag/sokoban-environment": {
                     "Fn::Sub": "${EnvName}"
                   }
                 }
