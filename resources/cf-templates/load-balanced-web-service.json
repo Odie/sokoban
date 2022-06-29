@@ -735,6 +735,9 @@
         "HTTPListenerRule"
       ],
       "Properties": {
+        "ServiceName": {
+          "Fn::Sub": "${AppName}-${EnvName}-${WorkloadName}"
+        },
         "PlatformVersion": {
           "Fn::If": [
             "IsEC2",

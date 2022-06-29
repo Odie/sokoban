@@ -574,6 +574,9 @@
       },
       "Type": "AWS::ECS::Service",
       "Properties": {
+        "ServiceName": {
+          "Fn::Sub": "${AppName}-${EnvName}-${WorkloadName}"
+        },
         "PlatformVersion": {
           "Fn::If": [
             "IsEC2",

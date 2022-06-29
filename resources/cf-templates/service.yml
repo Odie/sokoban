@@ -286,6 +286,7 @@ Resources: # If a bucket URL is specified, that means the template exists.
     # DependsOn:
     #   - EnvControllerAction
     Properties:
+      ServiceName: !Sub '${AppName}-${EnvName}-${WorkloadName}'
       PlatformVersion: !If
         - IsEC2
         - !Ref AWS::NoValue
