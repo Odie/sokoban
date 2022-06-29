@@ -365,25 +365,26 @@
    [service (service-by-name context service-name)]
    (:runningCount service)))
 
+(defn service-shutdown-and-wait [context service-name]
+  (service-set-desired-count context service-name 0)
+  (wait-for 0 service-get-running-count context service-name))
+
+(defn service-stop-all-restart
+  ([context service-name]
+   (service-stop-all-restart context service-name 1))
+  ([context service-name desired-count]
+   (service-set-desired-count context service-name 0)
+   (wait-for 0 service-get-running-count context service-name)
+   (service-set-desired-count context service-name 1)))
+
 (comment
   (service-by-name @g/app-context "db")
 
   ;; Wait for service shutdown
-  (time
-   (do
-     (service-set-desired-count @g/app-context "db" 0)
-     (wait-for 0 service-get-running-count @g/app-context "db")))
+  (time (service-shutdown-and-wait @g/app-context "frontend"))
 
   ;; Service restart (shutdown and start)
-  (time
-   (do
-     (service-set-desired-count @g/app-context "db" 0)
-
-     (wait-for 0 service-get-running-count @g/app-context "db")
-
-     (service-set-desired-count @g/app-context "db" 1)
-
-     ))
+  (service-stop-all-restart @g/app-context "frontend")
 
   )
 
@@ -902,8 +903,6 @@ echo ECS_CONTAINER_INSTANCE_TAGS=%s"
                   :EnvName environment
                   :WorkloadName service-name
                   :ContainerImage "044973601964.dkr.ecr.us-west-1.amazonaws.com/kengoson-backend"
-                  ;; "044973601964.dkr.ecr.us-west-1.amazonaws.com/demo/api:cee7709"
-
                   :ContainerPort "8000"
                   :TaskCPU "256"
                   :TaskMemory "512"
@@ -912,6 +911,7 @@ echo ECS_CONTAINER_INSTANCE_TAGS=%s"
                   :TargetContainer service-name
                   :TargetPort "8000"
                   :LaunchType "EC2"
+                  :RulePath "api"
                   }
           req (setup-load-balanced-web-service--req-data params
                                                          {:envs {"DB_HOST" "db"
@@ -1000,6 +1000,39 @@ echo ECS_CONTAINER_INSTANCE_TAGS=%s"
     (cf-watch-for-stack-completion cf (:StackId create-result))
     create-result)
 
+  ;; Step 6: Frontend
+  (def create-result
+    (let [environment (:env-name @g/app-context)
+          app-name (:app-name @g/app-context)
+          account-id (:account-id @g/app-context)
+          service-name "frontend"
+          params {:AppName app-name
+                  :EnvName environment
+                  :WorkloadName service-name
+                  :ContainerImage "044973601964.dkr.ecr.us-west-1.amazonaws.com/kengoson-web-client"
+                  :ContainerPort "80"
+                  :TaskCPU "256"
+                  :TaskMemory "512"
+                  :TaskCount "1"
+                  :LogRetention "30"
+                  :TargetContainer service-name
+                  :TargetPort "80"
+                  :LaunchType "EC2"
+                  }
+          req (setup-load-balanced-web-service--req-data params {})
+          ;; req (assoc req :DisableRollback true)
+          spec? (u/on-spec? (aws/request-spec-key cf :CreateStack) req)]
+
+      ;; spec?
+      (if (true? spec?)
+        (cf-stack-ensure cf req)
+        spec?)
+      )
+    )
+
+  (if-not (au/aws-error? create-result)
+    (cf-watch-for-stack-completion cf (:StackId create-result))
+    create-result)
 
   ;;---------------------------------------------------------------------
   ;; Misc actions
