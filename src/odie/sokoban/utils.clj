@@ -211,3 +211,40 @@
 
 (defn re-count [re s]
   (count (re-seq re s)))
+
+(defmacro collect [& bind-names]
+  (into {}
+        (map (juxt keyword identity))
+        (->> (select-keys &env bind-names)
+             keys)))
+
+(defmacro interp
+  [^String string]
+  "Like 'format' but with string interpolation"
+  (let [-re #"#\{(.*?)\}"
+        fstr (str/replace string -re "%s")
+        fargs (map #(read-string (second %)) (re-seq -re string))]
+    `(format ~fstr ~@fargs)))
+
+(defn fmt [string params]
+  "Like 'format' but with string interpolation"
+  (let [-re #"#\{(.*?)\}"
+        fstr (str/replace string -re "%s")
+        fargs (map #(get params (keyword (second %))) (re-seq -re string))]
+    (apply format fstr fargs)))
+
+(comment
+
+  (let [abc "world"
+        msg "Hello #{abc}"]
+    (interp "Hello #{abc}"))
+
+  (let [abc "world"
+        msg "Hello #{abc}"]
+    (fmt msg {:abc "world"}))
+
+  (let [abc "world"
+        msg "Hello #{abc}"]
+    (fmt msg (collect abc)))
+
+  )
