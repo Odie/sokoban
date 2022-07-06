@@ -1,7 +1,8 @@
 (ns odie.sokoban.aws-api
   (:require [cognitect.aws.service :as aws-service]
             [cognitect.aws.client.api :as aws]
-            [odie.sokoban.aws-utils :as au]))
+            [odie.sokoban.aws-utils :as au]
+            [clojure.data]))
 
 
 (defonce used-apis (atom #{}))

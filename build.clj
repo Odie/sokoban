@@ -15,3 +15,9 @@
       (bb/run-tests)
       (bb/clean)
       (bb/uber)))
+
+(defn uber [opts]
+  (-> opts
+      (assoc :lib lib :version version :main main)
+      (bb/clean)
+      (bb/uber)))

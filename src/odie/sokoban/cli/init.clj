@@ -7,7 +7,8 @@
             [odie.sokoban.aws-api :as api]
             [odie.sokoban.aws-utils :as au]
             [odie.sokoban.globals :as g]
-            [odie.sokoban.compose-file :as compose-file]))
+            [odie.sokoban.compose-file :as compose-file]
+            [odie.sokoban.shell :refer [shell]]))
 
 (defn wiz-use-existing-image-repo [compose-service-entry sk-svr]
   (let [app-name (:app-name @g/app-context)
@@ -115,7 +116,8 @@
 
       ;; Actually perform the work
       (init- (into params {:compose-file-data (compose-file/read-compose-file compose-file)
-                           :project-file project-file})))))
+                           :project-file project-file}))))
+  )
 
 (def dispatch-table
   [{:cmds ["init"] :cmds-opts [] :fn init}])
@@ -128,5 +130,11 @@
   (fs/with-mutable-cwd
     (fs/chdir (fs/expand-home "~/dev/kengoson/backend"))
     (init {}))
+
+  (shell {:dir (fs/expand-home "~/dev/kengoson/backend")}
+         "docker build . -t some/tag --file Dockerfile")
+
+  (shell {:dir (fs/expand-home "~/dev/kengoson/backend")}
+         "sleep 2")
 
   )

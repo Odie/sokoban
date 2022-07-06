@@ -248,3 +248,19 @@
     (fmt msg (collect abc)))
 
   )
+
+(defn ensure-in-seq-coll
+  "Make sure the given item `x` is in either a list or a vector"
+  [x]
+  (if-not (vector-or-seq? x)
+    (list x)
+    x))
+
+(comment
+  (let [x "123"]
+    (vector-or-seq? (ensure-in-seq-coll x)))
+
+  (let [x (list "123" "456")]
+    (vector-or-seq? (ensure-in-seq-coll x)))
+
+  )
